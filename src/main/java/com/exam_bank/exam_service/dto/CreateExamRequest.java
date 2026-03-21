@@ -11,7 +11,7 @@ public class CreateExamRequest {
     private String description;
     private Integer durationMinutes;
     private Integer passingScore;
-
+    private List<String> tags;
     private List<QuestionDto> questions;
 
     @Getter

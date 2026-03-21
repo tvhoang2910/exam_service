@@ -96,7 +96,9 @@ public class ExamManagementService {
         exam.setDescription(request.getDescription());
         exam.setDurationMinutes(request.getDurationMinutes());
         exam.setPassingScore(request.getPassingScore());
-
+        if (request.getTags() != null) {
+            exam.setTags(request.getTags());
+        }
         if (request.getQuestions() != null) {
             exam.setTotalQuestions(request.getQuestions().size());
         } else {
