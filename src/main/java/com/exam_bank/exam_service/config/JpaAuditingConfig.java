@@ -6,6 +6,7 @@ import org.springframework.data.domain.AuditorAware;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import java.util.Optional;
 
@@ -19,6 +20,13 @@ public class JpaAuditingConfig {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
             if (authentication == null || !authentication.isAuthenticated()) {
                 return Optional.of("system");
+            }
+
+            if (authentication instanceof JwtAuthenticationToken jwtAuthenticationToken) {
+                Object userIdClaim = jwtAuthenticationToken.getToken().getClaims().get("userId");
+                if (userIdClaim != null) {
+                    return Optional.of(String.valueOf(userIdClaim));
+                }
             }
 
             String principal = authentication.getName();

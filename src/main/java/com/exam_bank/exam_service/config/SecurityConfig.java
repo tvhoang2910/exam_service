@@ -13,6 +13,7 @@ import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -82,7 +83,23 @@ public class SecurityConfig {
 
         OAuth2TokenValidator<Jwt> defaultValidators = JwtValidators
                 .createDefaultWithIssuer(authJwtProperties.getIssuer());
-        jwtDecoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(defaultValidators));
+        OAuth2TokenValidator<Jwt> hasRoleClaim = new JwtClaimValidator<>("role",
+                role -> role instanceof String value && StringUtils.hasText(value));
+        OAuth2TokenValidator<Jwt> hasUserIdClaim = new JwtClaimValidator<>("userId", claim -> {
+            if (claim instanceof Number number) {
+                return number.longValue() > 0;
+            }
+            if (claim instanceof String value) {
+                try {
+                    return Long.parseLong(value.trim()) > 0;
+                } catch (NumberFormatException ex) {
+                    return false;
+                }
+            }
+            return false;
+        });
+        jwtDecoder
+                .setJwtValidator(new DelegatingOAuth2TokenValidator<>(defaultValidators, hasRoleClaim, hasUserIdClaim));
 
         return jwtDecoder;
     }
