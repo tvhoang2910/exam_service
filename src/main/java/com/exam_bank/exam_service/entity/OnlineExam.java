@@ -8,7 +8,9 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Getter
 @Setter
@@ -28,9 +30,12 @@ public class OnlineExam extends BaseEntity {
     @Column(name = "description", columnDefinition = "TEXT", comment = "Mo ta chi tiet de thi")
     private String description;
 
-    @JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "tags", columnDefinition = "text[] default '{}'::text[]", comment = "Nhan de tim kiem va loc")
-    private List<String> tags = new ArrayList<>();
+    @ManyToMany(cascade = {CascadeType.PERSIST, CascadeType.MERGE})
+    @JoinTable(name = "exam_tags",
+            joinColumns = @JoinColumn(name = "exam_id"),
+            inverseJoinColumns = @JoinColumn(name = "tag_id")
+    )
+    private Set<Tag> tags = new HashSet<>();
 
     @Convert(converter = OnlineExamSourceConverter.class)
     @Column(name = "source", nullable = false, length = 30, comment = "Nguon tao de thi")

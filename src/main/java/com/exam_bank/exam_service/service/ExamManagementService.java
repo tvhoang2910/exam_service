@@ -20,6 +20,7 @@ public class ExamManagementService {
     private final OnlineExamRepository examRepo;
     private final QuestionRepository questionRepo;
     private final QuestionOptionRepository optionRepo;
+    private final TagRepository tagRepo; // Đã tiêm TagRepository vào đây
 
     @Transactional
     public ExamResponse createManualExam(CreateExamRequest request) {
@@ -96,9 +97,32 @@ public class ExamManagementService {
         exam.setDescription(request.getDescription());
         exam.setDurationMinutes(request.getDurationMinutes());
         exam.setPassingScore(request.getPassingScore());
-        if (request.getTags() != null) {
-            exam.setTags(request.getTags());
+
+        // --- BỘ XỬ LÝ TAGS THÔNG MINH ---
+        if (request.getTags() != null && !request.getTags().isEmpty()) {
+            Set<Tag> examTags = new HashSet<>();
+            for (String tagName : request.getTags()) {
+                String normalizedTagName = tagName.trim().toLowerCase(); // Chuẩn hóa về chữ thường
+                if (normalizedTagName.isEmpty()) continue;
+
+                // Dò tìm trong Database, chưa có thì tạo mới, có rồi thì lấy ra dùng
+                Tag tag = tagRepo.findByName(normalizedTagName)
+                        .orElseGet(() -> {
+                            Tag newTag = new Tag();
+                            newTag.setName(normalizedTagName);
+                            return tagRepo.save(newTag);
+                        });
+                examTags.add(tag);
+            }
+            exam.setTags(examTags); // Gắn tập hợp Tag vào Đề thi
+        } else {
+            // Nếu update mà người dùng xóa hết tag, thì dọn sạch danh sách tag của đề thi này
+            if (exam.getTags() != null) {
+                exam.getTags().clear();
+            }
         }
+        // --------------------------------
+
         if (request.getQuestions() != null) {
             exam.setTotalQuestions(request.getQuestions().size());
         } else {
@@ -163,6 +187,15 @@ public class ExamManagementService {
         response.setStatus(exam.getStatus());
         response.setCreatedAt(exam.getCreatedAt());
         response.setModifiedAt(exam.getModifiedAt());
+
+        // --- DỊCH TỪ SET<TAG> TRONG DB THÀNH LIST<STRING> CHO FRONTEND ---
+        if (exam.getTags() != null && !exam.getTags().isEmpty()) {
+            List<String> tagNames = exam.getTags().stream()
+                    .map(Tag::getName)
+                    .toList();
+            response.setTags(tagNames);
+        }
+        // ----------------------------------------------------------------
 
         if (!includeQuestions) {
             return response;
