@@ -2,6 +2,7 @@ package com.exam_bank.exam_service.service;
 
 import com.exam_bank.exam_service.dto.CreateExamRequest;
 import com.exam_bank.exam_service.dto.ExamResponse;
+import com.exam_bank.exam_service.dto.TagDto;
 import com.exam_bank.exam_service.entity.*;
 import com.exam_bank.exam_service.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.*;
 
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
@@ -20,6 +22,8 @@ public class ExamManagementService {
     private final OnlineExamRepository examRepo;
     private final QuestionRepository questionRepo;
     private final QuestionOptionRepository optionRepo;
+    private final TagRepository tagRepo;
+    private final TagService tagService;
 
     @Transactional
     public ExamResponse createManualExam(CreateExamRequest request) {
@@ -97,6 +101,13 @@ public class ExamManagementService {
         exam.setDurationMinutes(request.getDurationMinutes());
         exam.setPassingScore(request.getPassingScore());
 
+        Set<Tag> examTags = resolveExamTags(request.getTagIds(), request.getNewTags());
+        if (exam.getTags() == null) {
+            exam.setTags(new HashSet<>());
+        }
+        exam.getTags().clear();
+        exam.getTags().addAll(examTags);
+
         if (request.getQuestions() != null) {
             exam.setTotalQuestions(request.getQuestions().size());
         } else {
@@ -104,6 +115,33 @@ public class ExamManagementService {
         }
 
         return exam;
+    }
+
+    private Set<Tag> resolveExamTags(List<Long> tagIds, List<String> newTags) {
+        Set<Tag> resolved = new HashSet<>();
+
+        if (tagIds != null && !tagIds.isEmpty()) {
+            Set<Long> uniqueIds = new HashSet<>(tagIds);
+            List<Tag> existingTags = tagRepo.findAllById(uniqueIds);
+            if (existingTags.size() != uniqueIds.size()) {
+                throw new ResponseStatusException(BAD_REQUEST, "One or more tags do not exist");
+            }
+            resolved.addAll(existingTags);
+        }
+
+        if (newTags != null && !newTags.isEmpty()) {
+            for (String rawName : newTags) {
+                String normalizedName = tagService.normalizeTagName(rawName);
+                Tag tag = tagRepo.findByName(normalizedName)
+                        .orElseGet(() -> {
+                            TagDto created = tagService.createTag(normalizedName);
+                            return tagRepo.getReferenceById(created.getId());
+                        });
+                resolved.add(tag);
+            }
+        }
+
+        return resolved;
     }
 
     private void upsertQuestions(OnlineExam exam, List<CreateExamRequest.QuestionDto> questionDtos) {
@@ -161,6 +199,14 @@ public class ExamManagementService {
         response.setStatus(exam.getStatus());
         response.setCreatedAt(exam.getCreatedAt());
         response.setModifiedAt(exam.getModifiedAt());
+
+        if (exam.getTags() != null && !exam.getTags().isEmpty()) {
+            List<TagDto> tags = exam.getTags().stream()
+                    .sorted(Comparator.comparing(Tag::getName))
+                    .map(tagService::toDto)
+                    .toList();
+            response.setTags(tags);
+        }
 
         if (!includeQuestions) {
             return response;

@@ -1,14 +1,22 @@
 package com.exam_bank.exam_service.entity;
 
-import jakarta.persistence.*;
+import java.util.HashSet;
+import java.util.Set;
+
+import org.hibernate.annotations.ColumnDefault;
+
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.CheckConstraint;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.ManyToMany;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
-import org.hibernate.annotations.ColumnDefault;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
-
-import java.util.ArrayList;
-import java.util.List;
 
 @Getter
 @Setter
@@ -28,9 +36,9 @@ public class OnlineExam extends BaseEntity {
     @Column(name = "description", columnDefinition = "TEXT", comment = "Mo ta chi tiet de thi")
     private String description;
 
-    @JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "tags", columnDefinition = "text[] default '{}'::text[]", comment = "Nhan de tim kiem va loc")
-    private List<String> tags = new ArrayList<>();
+    @ManyToMany(cascade = { CascadeType.PERSIST, CascadeType.MERGE })
+    @JoinTable(name = "exam_tags", joinColumns = @JoinColumn(name = "exam_id"), inverseJoinColumns = @JoinColumn(name = "tag_id"))
+    private Set<Tag> tags = new HashSet<>();
 
     @Convert(converter = OnlineExamSourceConverter.class)
     @Column(name = "source", nullable = false, length = 30, comment = "Nguon tao de thi")
