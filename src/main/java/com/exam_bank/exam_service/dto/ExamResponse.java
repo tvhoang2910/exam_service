@@ -20,7 +20,7 @@ public class ExamResponse {
     private OnlineExamStatus status;
     private Instant createdAt;
     private Instant modifiedAt;
-    private List<String> tags;
+    private List<TagDto> tags = new ArrayList<>();
     private List<QuestionResponse> questions = new ArrayList<>();
 
     @Getter
