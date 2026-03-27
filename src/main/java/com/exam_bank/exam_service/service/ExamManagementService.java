@@ -6,6 +6,7 @@ import com.exam_bank.exam_service.dto.TagDto;
 import com.exam_bank.exam_service.entity.*;
 import com.exam_bank.exam_service.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -20,19 +21,23 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 public class ExamManagementService {
 
     private final OnlineExamRepository examRepo;
+    private final ExamAttemptRepository examAttemptRepo;
     private final QuestionRepository questionRepo;
     private final QuestionOptionRepository optionRepo;
     private final TagRepository tagRepo;
     private final TagService tagService;
+    private final ExamFlowCacheService examFlowCacheService;
 
     @Transactional
+    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams", "managedExamDetail" }, allEntries = true)
     public ExamResponse createManualExam(CreateExamRequest request) {
         OnlineExam exam = buildExamEntity(new OnlineExam(), request);
         exam.setSource(OnlineExamSource.MANUAL_CREATED);
         exam.setStatus(OnlineExamStatus.DRAFT);
         OnlineExam savedExam = examRepo.save(exam);
         upsertQuestions(savedExam, request.getQuestions());
-        return mapExamToResponse(savedExam, true);
+        examFlowCacheService.evictExam(savedExam.getId());
+        return mapExamToResponse(savedExam, false, true, true);
     }
 
     @Transactional(readOnly = true)
@@ -44,41 +49,73 @@ public class ExamManagementService {
     @Transactional(readOnly = true)
     public ExamResponse getManagedExamById(Long examId) {
         OnlineExam exam = findExamOrThrow(examId);
-        return mapExamToResponse(exam, true);
+        return mapExamToResponse(exam, true, true, true);
     }
 
     @Transactional
+    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams", "managedExamDetail" }, allEntries = true)
     public ExamResponse updateExam(Long examId, CreateExamRequest request) {
         OnlineExam existing = findExamOrThrow(examId);
+
+        long attemptCount = examAttemptRepo.countByExamId(examId);
+        List<Question> existingQuestions = questionRepo.findByExamIdOrderByIdAsc(examId);
+        boolean questionTreeChanged = isQuestionTreeChanged(existingQuestions, request.getQuestions());
+
+        // Keep question tree immutable once historical attempts exist, but allow
+        // metadata updates.
+        if (attemptCount > 0 && questionTreeChanged) {
+            throw new ResponseStatusException(BAD_REQUEST,
+                    "Cannot update questions because attempts already exist. You can still update exam metadata (title, duration, passing score, max attempts, tags, status). Create a new exam version to change questions.");
+        }
+
         OnlineExam updatedExam = examRepo.save(buildExamEntity(existing, request));
 
-        List<Question> existingQuestions = questionRepo.findByExamIdOrderByIdAsc(examId);
-        deleteQuestionsAndOptions(existingQuestions);
-        upsertQuestions(updatedExam, request.getQuestions());
+        // Avoid expensive delete/insert cycles when questions/options are unchanged.
+        if (attemptCount == 0 && questionTreeChanged) {
+            deleteQuestionsAndOptions(existingQuestions);
+            upsertQuestions(updatedExam, request.getQuestions());
+        }
 
-        return mapExamToResponse(updatedExam, true);
+        examFlowCacheService.evictExam(updatedExam.getId());
+
+        return mapExamToResponse(updatedExam, false, true, true);
     }
 
     @Transactional
+    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams", "managedExamDetail" }, allEntries = true)
     public void deleteExam(Long examId) {
         OnlineExam existing = findExamOrThrow(examId);
+
+        if (examAttemptRepo.countByExamId(examId) > 0) {
+            existing.setStatus(OnlineExamStatus.ARCHIVED);
+            if (existing.getTitle() != null && !existing.getTitle().startsWith("[DELETED] ")) {
+                existing.setTitle("[DELETED] " + existing.getTitle());
+            }
+            examRepo.save(existing);
+            examFlowCacheService.evictExam(examId);
+            return;
+        }
+
         List<Question> existingQuestions = questionRepo.findByExamIdOrderByIdAsc(examId);
         deleteQuestionsAndOptions(existingQuestions);
         examRepo.delete(existing);
+        examFlowCacheService.evictExam(examId);
     }
 
     @Transactional
+    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams", "managedExamDetail" }, allEntries = true)
     public ExamResponse updateExamStatus(Long examId, OnlineExamStatus status) {
         OnlineExam existing = findExamOrThrow(examId);
         existing.setStatus(status);
         OnlineExam saved = examRepo.save(existing);
-        return mapExamToResponse(saved, false);
+        examFlowCacheService.evictExam(examId);
+        return mapExamToResponse(saved, false, true, false);
     }
 
     @Transactional(readOnly = true)
     public List<ExamResponse> getPublicExams() {
         List<OnlineExam> exams = examRepo.findByStatusOrderByCreatedAtDesc(OnlineExamStatus.PUBLISHED);
-        return mapExamListToSummary(exams);
+        return exams.stream().map(exam -> mapExamToResponse(exam, false, false, true)).toList();
     }
 
     @Transactional(readOnly = true)
@@ -87,7 +124,12 @@ public class ExamManagementService {
         if (exam.getStatus() != OnlineExamStatus.PUBLISHED) {
             throw new ResponseStatusException(NOT_FOUND, "Exam not found");
         }
-        return mapExamToResponse(exam, true);
+        return mapExamToResponse(exam, false, false, true);
+    }
+
+    @Transactional(readOnly = true)
+    public ExamResponse mapPublicAttemptView(OnlineExam exam) {
+        return mapExamToResponse(exam, true, false, true);
     }
 
     private OnlineExam findExamOrThrow(Long examId) {
@@ -100,13 +142,17 @@ public class ExamManagementService {
         exam.setDescription(request.getDescription());
         exam.setDurationMinutes(request.getDurationMinutes());
         exam.setPassingScore(request.getPassingScore());
+        Integer requestedMaxAttempts = request.getMaxAttempts();
+        exam.setMaxAttempts(requestedMaxAttempts == null ? 100 : Math.max(1, requestedMaxAttempts));
 
         Set<Tag> examTags = resolveExamTags(request.getTagIds(), request.getNewTags());
         if (exam.getTags() == null) {
             exam.setTags(new HashSet<>());
         }
-        exam.getTags().clear();
-        exam.getTags().addAll(examTags);
+        if (isTagSetChanged(exam.getTags(), examTags)) {
+            exam.getTags().clear();
+            exam.getTags().addAll(examTags);
+        }
 
         if (request.getQuestions() != null) {
             exam.setTotalQuestions(request.getQuestions().size());
@@ -182,25 +228,103 @@ public class ExamManagementService {
         questionRepo.deleteByExamId(questions.getFirst().getExam().getId());
     }
 
+    private boolean isQuestionTreeChanged(List<Question> existingQuestions,
+            List<CreateExamRequest.QuestionDto> requestedQuestions) {
+        List<CreateExamRequest.QuestionDto> requested = requestedQuestions == null ? List.of() : requestedQuestions;
+        if (existingQuestions.size() != requested.size()) {
+            return true;
+        }
+
+        if (existingQuestions.isEmpty()) {
+            return false;
+        }
+
+        List<Long> questionIds = existingQuestions.stream().map(BaseEntity::getId).toList();
+        Map<Long, List<QuestionOption>> optionsByQuestionId = new HashMap<>();
+        for (QuestionOption option : optionRepo.findByQuestionIdInOrderByIdAsc(questionIds)) {
+            optionsByQuestionId
+                    .computeIfAbsent(option.getQuestion().getId(), key -> new ArrayList<>())
+                    .add(option);
+        }
+
+        for (int i = 0; i < existingQuestions.size(); i++) {
+            Question existingQuestion = existingQuestions.get(i);
+            CreateExamRequest.QuestionDto requestedQuestion = requested.get(i);
+
+            if (!Objects.equals(normalize(existingQuestion.getContent()), normalize(requestedQuestion.getContent()))) {
+                return true;
+            }
+
+            if (!Objects.equals(normalize(existingQuestion.getExplanation()),
+                    normalize(requestedQuestion.getExplanation()))) {
+                return true;
+            }
+
+            if (!Objects.equals(existingQuestion.getScoreWeight(), requestedQuestion.getScoreWeight())) {
+                return true;
+            }
+
+            List<QuestionOption> existingOptions = optionsByQuestionId.getOrDefault(existingQuestion.getId(),
+                    List.of());
+            List<CreateExamRequest.OptionDto> requestedOptions = requestedQuestion.getOptions() == null
+                    ? List.of()
+                    : requestedQuestion.getOptions();
+
+            if (existingOptions.size() != requestedOptions.size()) {
+                return true;
+            }
+
+            for (int optionIndex = 0; optionIndex < existingOptions.size(); optionIndex++) {
+                QuestionOption existingOption = existingOptions.get(optionIndex);
+                CreateExamRequest.OptionDto requestedOption = requestedOptions.get(optionIndex);
+
+                if (!Objects.equals(normalize(existingOption.getContent()), normalize(requestedOption.getContent()))) {
+                    return true;
+                }
+
+                boolean requestedIsCorrect = Boolean.TRUE.equals(requestedOption.getIsCorrect());
+                if (!Objects.equals(existingOption.getIsCorrect(), requestedIsCorrect)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private boolean isTagSetChanged(Set<Tag> currentTags, Set<Tag> requestedTags) {
+        Set<Long> currentTagIds = currentTags.stream().map(Tag::getId).collect(HashSet::new, HashSet::add, HashSet::addAll);
+        Set<Long> requestedTagIds = requestedTags.stream().map(Tag::getId).collect(HashSet::new, HashSet::add, HashSet::addAll);
+        return !Objects.equals(currentTagIds, requestedTagIds);
+    }
+
     private List<ExamResponse> mapExamListToSummary(List<OnlineExam> exams) {
         return exams.stream()
-                .map(exam -> mapExamToResponse(exam, false))
+                .map(exam -> mapExamToResponse(exam, false, true, true))
                 .toList();
     }
 
-    private ExamResponse mapExamToResponse(OnlineExam exam, boolean includeQuestions) {
+    private ExamResponse mapExamToResponse(OnlineExam exam,
+                                           boolean includeQuestions,
+                                           boolean includeAnswerKey,
+                                           boolean includeTags) {
         ExamResponse response = new ExamResponse();
         response.setId(exam.getId());
         response.setTitle(exam.getTitle());
         response.setDescription(exam.getDescription());
         response.setDurationMinutes(exam.getDurationMinutes());
         response.setPassingScore(exam.getPassingScore());
+        response.setMaxAttempts(exam.getMaxAttempts());
         response.setTotalQuestions(exam.getTotalQuestions());
         response.setStatus(exam.getStatus());
         response.setCreatedAt(exam.getCreatedAt());
         response.setModifiedAt(exam.getModifiedAt());
 
-        if (exam.getTags() != null && !exam.getTags().isEmpty()) {
+        if (includeTags && exam.getTags() != null && !exam.getTags().isEmpty()) {
             List<TagDto> tags = exam.getTags().stream()
                     .sorted(Comparator.comparing(Tag::getName))
                     .map(tagService::toDto)
@@ -239,7 +363,7 @@ public class ExamManagementService {
                 ExamResponse.OptionResponse optionResponse = new ExamResponse.OptionResponse();
                 optionResponse.setId(option.getId());
                 optionResponse.setContent(option.getContent());
-                optionResponse.setIsCorrect(option.getIsCorrect());
+                optionResponse.setIsCorrect(includeAnswerKey ? option.getIsCorrect() : null);
                 optionResponses.add(optionResponse);
             }
 

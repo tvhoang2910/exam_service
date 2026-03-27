@@ -52,6 +52,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/exams/public", "/exams/public/**").permitAll()
+                        .requestMatchers("/attempts", "/attempts/**", "/users/me/attempts")
+                        .hasAnyRole("USER", "ADMIN", "CONTRIBUTOR")
                         .requestMatchers("/tags", "/tags/**").hasAnyRole("ADMIN", "CONTRIBUTOR")
                         .requestMatchers("/exams/manage", "/exams/manage/**").hasAnyRole("ADMIN", "CONTRIBUTOR")
                         .requestMatchers("/exams/**").hasAnyRole("ADMIN", "CONTRIBUTOR")

@@ -16,6 +16,7 @@ public class ExamResponse {
     private String description;
     private Integer durationMinutes;
     private Integer passingScore;
+    private Integer maxAttempts;
     private Integer totalQuestions;
     private OnlineExamStatus status;
     private Instant createdAt;

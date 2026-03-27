@@ -11,6 +11,7 @@ public class CreateExamRequest {
     private String description;
     private Integer durationMinutes;
     private Integer passingScore;
+    private Integer maxAttempts;
     private List<Long> tagIds;
     private List<String> newTags;
     private List<QuestionDto> questions;
