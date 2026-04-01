@@ -1,6 +1,7 @@
 package com.exam_bank.exam_service.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestControllerAdvice
+@Slf4j
 public class ApiExceptionHandler {
 
     @ExceptionHandler(ResponseStatusException.class)
@@ -21,6 +23,8 @@ public class ApiExceptionHandler {
             HttpServletRequest request) {
         HttpStatus status = HttpStatus.valueOf(exception.getStatusCode().value());
         String reason = exception.getReason() == null ? status.getReasonPhrase() : exception.getReason();
+        log.warn("Client error {} {} on {}: {}",
+                status.value(), status.getReasonPhrase(), request.getRequestURI(), reason);
         return ResponseEntity.status(status).body(buildErrorBody(status, reason, request));
     }
 
@@ -30,6 +34,17 @@ public class ApiExceptionHandler {
             HttpServletRequest request) {
         HttpStatus status = HttpStatus.CONFLICT;
         String reason = "Operation violates data integrity constraints.";
+        log.warn("Data integrity violation on {}: {}", request.getRequestURI(), exception.getMostSpecificCause().getMessage());
+        return ResponseEntity.status(status).body(buildErrorBody(status, reason, request));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, Object>> handleGenericException(
+            Exception exception,
+            HttpServletRequest request) {
+        HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
+        String reason = "An unexpected error occurred.";
+        log.error("Unexpected error on {}: {}", request.getRequestURI(), exception.getMessage(), exception);
         return ResponseEntity.status(status).body(buildErrorBody(status, reason, request));
     }
 

@@ -15,7 +15,7 @@ import java.util.Optional;
 
 @Repository
 public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, Long> {
-    @EntityGraph(attributePaths = "exam")
+    @EntityGraph(attributePaths = {"exam", "exam.tags"})
     Optional<ExamAttempt> findByIdAndUserId(Long id, Long userId);
 
     Optional<ExamAttempt> findFirstByExamIdAndUserIdAndStatusOrderByCreatedAtDesc(Long examId, Long userId,
@@ -43,10 +43,10 @@ public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, Long> 
     @Query("delete from ExamAttempt attempt where attempt.exam.id = :examId")
     void deleteByExamId(Long examId);
 
-    @EntityGraph(attributePaths = "exam")
+    @EntityGraph(attributePaths = {"exam", "exam.tags"})
     List<ExamAttempt> findByUserIdOrderByCreatedAtDesc(Long userId);
 
-        @EntityGraph(attributePaths = "exam")
+        @EntityGraph(attributePaths = {"exam", "exam.tags"})
         @Query("""
                         select attempt
                         from ExamAttempt attempt

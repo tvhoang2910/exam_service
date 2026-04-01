@@ -25,6 +25,9 @@ import org.springframework.web.server.ResponseStatusException;
 import com.exam_bank.exam_service.dto.AttemptResultResponse;
 import com.exam_bank.exam_service.dto.AttemptSummaryResponse;
 import com.exam_bank.exam_service.dto.ExamResponse;
+import com.exam_bank.exam_service.dto.ExamSubmittedEvent;
+import com.exam_bank.exam_service.dto.ExamSubmittedEvent.QuestionAnswered;
+import com.exam_bank.exam_service.dto.ExamSubmittedEvent.TagInfo;
 import com.exam_bank.exam_service.dto.SaveAttemptAnswerRequest;
 import com.exam_bank.exam_service.dto.SaveAttemptAnswersBatchRequest;
 import com.exam_bank.exam_service.dto.StartAttemptRequest;
@@ -35,7 +38,6 @@ import com.exam_bank.exam_service.entity.ExamAttemptStatus;
 import com.exam_bank.exam_service.entity.OnlineExam;
 import com.exam_bank.exam_service.entity.OnlineExamStatus;
 import com.exam_bank.exam_service.entity.Question;
-import com.exam_bank.exam_service.entity.QuestionOption;
 import com.exam_bank.exam_service.entity.QuestionReviewEvent;
 import com.exam_bank.exam_service.repository.ExamAttemptAnswerRepository;
 import com.exam_bank.exam_service.repository.ExamAttemptRepository;
@@ -63,6 +65,7 @@ public class ExamAttemptService {
     private final QuestionReviewEventRepository questionReviewEventRepository;
     private final ExamManagementService examManagementService;
     private final ExamFlowCacheService examFlowCacheService;
+    private final RabbitMQEventPublisher rabbitMQEventPublisher;
 
     @Transactional(readOnly = true)
     public ExamResponse getAttemptView(Long examId) {
@@ -197,12 +200,16 @@ public class ExamAttemptService {
     public AttemptResultResponse submitAttempt(Long attemptId, Long userId) {
         ExamAttempt attempt = getAttemptOwnedByUser(attemptId, userId);
         if (attempt.getStatus() != ExamAttemptStatus.IN_PROGRESS) {
-            return buildAttemptResult(attempt);
+            return buildAttemptResult(attempt, null, null);
         }
 
         boolean autoSubmitted = Instant.now().isAfter(attempt.getExpiresAt());
-        finalizeAttempt(attempt, autoSubmitted);
-        return buildAttemptResult(attempt);
+        ExamFlowCacheService.QuestionBankSnapshot questionBank = finalizeAttempt(attempt, autoSubmitted);
+        Map<Long, ExamAttemptAnswer> answerByQuestionId = examAttemptAnswerRepository
+                .findByAttemptIdOrderByQuestionIdAsc(attempt.getId())
+                .stream()
+                .collect(Collectors.toMap(answer -> answer.getQuestion().getId(), answer -> answer, (a, b) -> a));
+        return buildAttemptResult(attempt, questionBank, answerByQuestionId);
     }
 
     @Transactional(readOnly = true)
@@ -211,7 +218,7 @@ public class ExamAttemptService {
         if (attempt.getStatus() == ExamAttemptStatus.IN_PROGRESS && Instant.now().isAfter(attempt.getExpiresAt())) {
             throw new ResponseStatusException(BAD_REQUEST, "Attempt expired and pending submission");
         }
-        return buildAttemptResult(attempt);
+        return buildAttemptResult(attempt, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -238,10 +245,10 @@ public class ExamAttemptService {
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Attempt not found"));
     }
 
-    private void finalizeAttempt(ExamAttempt attempt, boolean autoSubmitted) {
+    private ExamFlowCacheService.QuestionBankSnapshot finalizeAttempt(ExamAttempt attempt, boolean autoSubmitted) {
         ExamFlowCacheService.QuestionBankSnapshot questionBank = examFlowCacheService.getOrLoadQuestionBank(
-            attempt.getExam().getId(),
-            () -> loadQuestionBankSnapshot(attempt.getExam().getId()));
+                attempt.getExam().getId(),
+                () -> loadQuestionBankSnapshot(attempt.getExam().getId()));
 
         List<ExamFlowCacheService.QuestionSnapshot> questions = questionBank.questions();
         if (questions.isEmpty()) {
@@ -259,7 +266,7 @@ public class ExamAttemptService {
 
         for (ExamFlowCacheService.QuestionSnapshot question : questions) {
             Set<Long> selectedIds = decodeOptionIds(
-                Optional.ofNullable(answerByQuestionId.get(question.questionId()))
+                    Optional.ofNullable(answerByQuestionId.get(question.questionId()))
                             .map(ExamAttemptAnswer::getSelectedOptionIds)
                             .orElse(null));
             Set<Long> correctIds = correctOptionIdsByQuestionId.getOrDefault(question.questionId(), Set.of());
@@ -271,10 +278,10 @@ public class ExamAttemptService {
             if (answer == null) {
                 answer = new ExamAttemptAnswer();
                 answer.setAttempt(attempt);
-            answer.setQuestion(questionRepository.getReferenceById(question.questionId()));
+                answer.setQuestion(questionRepository.getReferenceById(question.questionId()));
                 answer.setSelectedOptionIds("");
                 answer.setAnswerChangeCount(0);
-            answerByQuestionId.put(question.questionId(), answer);
+                answerByQuestionId.put(question.questionId(), answer);
             }
 
             answer.setIsCorrect(isCorrect);
@@ -299,6 +306,59 @@ public class ExamAttemptService {
         examAttemptRepository.save(attempt);
 
         createReviewEvents(attempt, questions, answerByQuestionId);
+        publishExamSubmittedEvent(attempt, questions, answerByQuestionId);
+
+        return questionBank;
+    }
+
+    private void publishExamSubmittedEvent(ExamAttempt attempt,
+            List<ExamFlowCacheService.QuestionSnapshot> questions,
+            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+        ExamSubmittedEvent event = new ExamSubmittedEvent();
+        event.setAttemptId(attempt.getId());
+        event.setUserId(attempt.getUserId());
+        event.setExamId(attempt.getExam().getId());
+        event.setExamTitle(attempt.getExam().getTitle());
+        event.setSubmittedAt(attempt.getSubmittedAt());
+        event.setScoreRaw(attempt.getScoreRaw());
+        event.setScoreMax(attempt.getScoreMax());
+        event.setScorePercent(attempt.getScorePercent());
+        event.setDurationSeconds(attempt.getDurationSeconds());
+
+        List<QuestionAnswered> questionEvents = new ArrayList<>();
+        for (ExamFlowCacheService.QuestionSnapshot qs : questions) {
+            ExamAttemptAnswer answer = answerByQuestionId.get(qs.questionId());
+            QuestionAnswered qe = new QuestionAnswered();
+            qe.setQuestionId(qs.questionId());
+            qe.setIsCorrect(Boolean.TRUE.equals(answer != null ? answer.getIsCorrect() : null));
+            qe.setEarnedScore(answer == null ? 0.0 : answer.getEarnedScore());
+            qe.setMaxScore(qs.scoreWeight() == null ? 1.0 : qs.scoreWeight());
+            qe.setResponseTimeMs(answer == null ? null : answer.getResponseTimeMs());
+            qe.setAnswerChangeCount(answer == null ? 0 : answer.getAnswerChangeCount());
+            qe.setDifficulty(qs.scoreWeight() == null ? 1.0 : qs.scoreWeight());
+            // tagIds from exam tags
+            if (attempt.getExam().getTags() != null) {
+                qe.setTagIds(attempt.getExam().getTags().stream()
+                        .map(tag -> String.valueOf(tag.getId()))
+                        .sorted()
+                        .collect(Collectors.joining(",")));
+            }
+            questionEvents.add(qe);
+        }
+        event.setQuestions(questionEvents);
+
+        List<TagInfo> tagInfos = attempt.getExam().getTags() == null ? List.of()
+                : attempt.getExam().getTags().stream()
+                        .map(tag -> {
+                            TagInfo ti = new TagInfo();
+                            ti.setTagId(tag.getId());
+                            ti.setTagName(tag.getName());
+                            return ti;
+                        })
+                        .toList();
+        event.setExamTags(tagInfos);
+
+        rabbitMQEventPublisher.publishExamSubmitted(event);
     }
 
     private void createReviewEvents(ExamAttempt attempt,
@@ -359,7 +419,28 @@ public class ExamAttemptService {
         return 3;
     }
 
-    private AttemptResultResponse buildAttemptResult(ExamAttempt attempt) {
+    // Overload: use pre-loaded data (avoids redundant DB query in submitAttempt
+    // path)
+    private AttemptResultResponse buildAttemptResult(ExamAttempt attempt,
+            ExamFlowCacheService.QuestionBankSnapshot questionBank,
+            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+        if (questionBank == null) {
+            questionBank = examFlowCacheService.getOrLoadQuestionBank(
+                    attempt.getExam().getId(),
+                    () -> loadQuestionBankSnapshot(attempt.getExam().getId()));
+        }
+        if (answerByQuestionId == null) {
+            answerByQuestionId = examAttemptAnswerRepository
+                    .findByAttemptIdOrderByQuestionIdAsc(attempt.getId())
+                    .stream()
+                    .collect(Collectors.toMap(answer -> answer.getQuestion().getId(), answer -> answer, (a, b) -> a));
+        }
+        return doBuildResult(attempt, questionBank, answerByQuestionId);
+    }
+
+    private AttemptResultResponse doBuildResult(ExamAttempt attempt,
+            ExamFlowCacheService.QuestionBankSnapshot questionBank,
+            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         AttemptResultResponse response = new AttemptResultResponse();
         response.setAttemptId(attempt.getId());
         response.setExamId(attempt.getExam().getId());
@@ -374,15 +455,6 @@ public class ExamAttemptService {
         response.setPassingScore(attempt.getExam().getPassingScore());
         response.setPassed(attempt.getPassed());
 
-        ExamFlowCacheService.QuestionBankSnapshot questionBank = examFlowCacheService.getOrLoadQuestionBank(
-            attempt.getExam().getId(),
-            () -> loadQuestionBankSnapshot(attempt.getExam().getId()));
-
-        Map<Long, ExamAttemptAnswer> answerByQuestionId = examAttemptAnswerRepository
-                .findByAttemptIdOrderByQuestionIdAsc(attempt.getId())
-                .stream()
-                .collect(Collectors.toMap(answer -> answer.getQuestion().getId(), answer -> answer, (a, b) -> a));
-
         List<AttemptResultResponse.QuestionResult> questionResults = new ArrayList<>();
         for (ExamFlowCacheService.QuestionSnapshot question : questionBank.questions()) {
             ExamAttemptAnswer answer = answerByQuestionId.get(question.questionId());
@@ -396,12 +468,12 @@ public class ExamAttemptService {
             item.setAnswerChangeCount(answer == null ? 0 : answer.getAnswerChangeCount());
 
             List<AttemptResultResponse.OptionResult> optionResults = questionBank.optionsByQuestionId()
-                .getOrDefault(question.questionId(), List.of())
+                    .getOrDefault(question.questionId(), List.of())
                     .stream()
                     .map(option -> {
                         AttemptResultResponse.OptionResult optionResult = new AttemptResultResponse.OptionResult();
-                optionResult.setId(option.optionId());
-                optionResult.setContent(option.content());
+                        optionResult.setId(option.optionId());
+                        optionResult.setContent(option.content());
                         return optionResult;
                     })
                     .toList();
@@ -409,7 +481,7 @@ public class ExamAttemptService {
 
             item.setSelectedOptionIds(
                     new ArrayList<>(decodeOptionIds(answer == null ? null : answer.getSelectedOptionIds())));
-                List<Long> correctOptionIds = questionBank.correctOptionIdsByQuestionId()
+            List<Long> correctOptionIds = questionBank.correctOptionIdsByQuestionId()
                     .getOrDefault(question.questionId(), Set.of())
                     .stream()
                     .sorted(Comparator.naturalOrder())

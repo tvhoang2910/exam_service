@@ -1,14 +1,14 @@
 package com.exam_bank.exam_service.repository;
 
-import com.exam_bank.exam_service.entity.QuestionOption;
-import org.springframework.data.jpa.repository.EntityGraph;
+import java.util.Collection;
+import java.util.List;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
-import java.util.Collection;
-import java.util.List;
+import com.exam_bank.exam_service.entity.QuestionOption;
 
 @Repository
 public interface QuestionOptionRepository extends JpaRepository<QuestionOption, Long> {

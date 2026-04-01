@@ -4,6 +4,7 @@ import com.exam_bank.exam_service.dto.CreateTagRequest;
 import com.exam_bank.exam_service.dto.TagDto;
 import com.exam_bank.exam_service.service.TagService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -14,17 +15,22 @@ import java.util.List;
 @RequestMapping("/tags")
 @CrossOrigin(origins = "http://localhost:5173")
 @RequiredArgsConstructor
+@Slf4j
 public class TagController {
 
     private final TagService tagService;
 
     @GetMapping
     public ResponseEntity<List<TagDto>> listTags(@RequestParam(required = false) String query) {
-        return ResponseEntity.ok(tagService.listTags(query));
+        List<TagDto> tags = tagService.listTags(query);
+        log.info("listTags: query={}, count={}", query, tags.size());
+        return ResponseEntity.ok(tags);
     }
 
     @PostMapping
     public ResponseEntity<TagDto> createTag(@RequestBody CreateTagRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(tagService.createTag(request.getName()));
+        TagDto tag = tagService.createTag(request.getName());
+        log.info("createTag: name={}, tagId={}", request.getName(), tag.getId());
+        return ResponseEntity.status(HttpStatus.CREATED).body(tag);
     }
 }

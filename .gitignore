@@ -31,3 +31,8 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Logs and test artifacts
+logs/
+*.log
+test-results/
