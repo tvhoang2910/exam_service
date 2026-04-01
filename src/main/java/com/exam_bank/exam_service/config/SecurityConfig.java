@@ -1,6 +1,7 @@
 package com.exam_bank.exam_service.config;
 
 import com.exam_bank.exam_service.config.properties.AuthJwtProperties;
+import com.exam_bank.exam_service.config.properties.CorsProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -27,7 +28,6 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.List;
@@ -37,9 +37,11 @@ import java.util.List;
 public class SecurityConfig {
 
     private final AuthJwtProperties authJwtProperties;
+    private final CorsProperties corsProperties;
 
-    public SecurityConfig(AuthJwtProperties authJwtProperties) {
+    public SecurityConfig(AuthJwtProperties authJwtProperties, CorsProperties corsProperties) {
         this.authJwtProperties = authJwtProperties;
+        this.corsProperties = corsProperties;
     }
 
     @Bean
@@ -70,10 +72,13 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5173"));
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept"));
-        configuration.setAllowCredentials(true);
+        configuration.setAllowedOrigins(List.of(corsProperties.getAllowedOrigins().split(","))
+                .stream()
+                .map(String::trim)
+                .toList());
+        configuration.setAllowedMethods(corsProperties.getAllowedMethods());
+        configuration.setAllowedHeaders(corsProperties.getAllowedHeaders());
+        configuration.setAllowCredentials(corsProperties.isAllowCredentials());
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

@@ -582,7 +582,7 @@ public class ExamAttemptService {
 
         // passingScore in [1..10] is treated as a traditional 10-point threshold.
         if (passingScore <= 10) {
-            return scoreMax * (passingScore / 10.0);
+            return scoreMax * ((passingScore * 1.0) / 10.0);
         }
 
         // For larger values, keep backward-compatible absolute-point semantics.
