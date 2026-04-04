@@ -1,6 +1,7 @@
 package com.exam_bank.exam_service.service;
 
 import com.exam_bank.exam_service.dto.ExamResponse;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -39,6 +40,21 @@ public class ExamFlowCacheService {
 
         attemptViewByExamId.remove(examId);
         questionBankByExamId.remove(examId);
+    }
+
+    /**
+     * Runs every 2 minutes to purge expired entries and prevent unbounded
+     * memory growth in the in-memory ConcurrentHashMaps.
+     */
+    @Scheduled(fixedRate = 120_000)
+    public void evictExpiredEntries() {
+        Instant now = Instant.now();
+
+        attemptViewByExamId.entrySet().removeIf(entry ->
+                entry.getValue().expiresAt().isBefore(now));
+
+        questionBankByExamId.entrySet().removeIf(entry ->
+                entry.getValue().expiresAt().isBefore(now));
     }
 
     private <T> T getOrLoad(ConcurrentHashMap<Long, CacheEntry<T>> cache,

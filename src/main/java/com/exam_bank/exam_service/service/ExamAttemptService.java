@@ -66,6 +66,8 @@ public class ExamAttemptService {
     private final ExamManagementService examManagementService;
     private final ExamFlowCacheService examFlowCacheService;
     private final RabbitMQEventPublisher rabbitMQEventPublisher;
+    private final AdminAlertPublisher adminAlertPublisher;
+    private final ExamSseService examSseService;
 
     @Transactional(readOnly = true)
     public ExamResponse getAttemptView(Long examId) {
@@ -127,6 +129,7 @@ public class ExamAttemptService {
         attempt.setSource("WEB");
 
         ExamAttempt saved = examAttemptRepository.save(attempt);
+        examSseService.onAttemptStarted(saved.getId(), exam.getId());
         return toStartAttemptResponse(saved, exam);
     }
 
@@ -200,6 +203,7 @@ public class ExamAttemptService {
     public AttemptResultResponse submitAttempt(Long attemptId, Long userId) {
         ExamAttempt attempt = getAttemptOwnedByUser(attemptId, userId);
         if (attempt.getStatus() != ExamAttemptStatus.IN_PROGRESS) {
+            examSseService.onAttemptEnded(attempt.getId());
             return buildAttemptResult(attempt, null, null);
         }
 
@@ -246,6 +250,7 @@ public class ExamAttemptService {
     }
 
     private ExamFlowCacheService.QuestionBankSnapshot finalizeAttempt(ExamAttempt attempt, boolean autoSubmitted) {
+        examSseService.onAttemptEnded(attempt.getId());
         ExamFlowCacheService.QuestionBankSnapshot questionBank = examFlowCacheService.getOrLoadQuestionBank(
                 attempt.getExam().getId(),
                 () -> loadQuestionBankSnapshot(attempt.getExam().getId()));
@@ -307,6 +312,13 @@ public class ExamAttemptService {
 
         createReviewEvents(attempt, questions, answerByQuestionId);
         publishExamSubmittedEvent(attempt, questions, answerByQuestionId);
+
+        // Publish admin alert
+        adminAlertPublisher.publishExamSubmittedAlert(
+                "Người dùng #" + attempt.getUserId(),
+                attempt.getExam().getId(),
+                attempt.getExam().getTitle(),
+                attempt.getId());
 
         return questionBank;
     }
