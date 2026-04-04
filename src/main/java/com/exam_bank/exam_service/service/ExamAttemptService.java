@@ -45,6 +45,7 @@ import com.exam_bank.exam_service.repository.OnlineExamRepository;
 import com.exam_bank.exam_service.repository.QuestionOptionRepository;
 import com.exam_bank.exam_service.repository.QuestionRepository;
 import com.exam_bank.exam_service.repository.QuestionReviewEventRepository;
+import com.exam_bank.exam_service.service.Sm2Service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -63,6 +64,7 @@ public class ExamAttemptService {
     private final QuestionRepository questionRepository;
     private final QuestionOptionRepository questionOptionRepository;
     private final QuestionReviewEventRepository questionReviewEventRepository;
+    private final Sm2Service sm2Service;
     private final ExamManagementService examManagementService;
     private final ExamFlowCacheService examFlowCacheService;
     private final RabbitMQEventPublisher rabbitMQEventPublisher;
@@ -403,6 +405,9 @@ public class ExamAttemptService {
             event.setDifficulty(question.scoreWeight() == null ? 1.0 : question.scoreWeight());
             event.setSource("EXAM_SUBMISSION");
             events.add(event);
+
+            // Record SM2 spaced-repetition
+            sm2Service.recordAttempt(attempt.getUserId(), question.questionId(), quality);
         }
 
         questionReviewEventRepository.saveAll(events);

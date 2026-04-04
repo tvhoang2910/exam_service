@@ -1,6 +1,7 @@
 package com.exam_bank.exam_service.dto;
 
 import com.exam_bank.exam_service.entity.OnlineExamStatus;
+import com.exam_bank.exam_service.entity.Question;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -31,6 +32,7 @@ public class ExamResponse {
         private String content;
         private String explanation;
         private Double scoreWeight;
+        private Question.Difficulty difficulty;
         private List<OptionResponse> options = new ArrayList<>();
     }
 

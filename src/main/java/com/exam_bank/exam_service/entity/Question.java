@@ -10,6 +10,17 @@ import lombok.Setter;
 @Table(name = "questions")
 public class Question extends BaseEntity {
 
+    public enum Difficulty {
+        EASY("Dễ"),       // ≥80% correctRate
+        MEDIUM("Trung bình"),  // ≥50%
+        HARD("Khó"),      // ≥20%
+        VERY_HARD("Cực khó"); // <20%
+
+        private final String label;
+        Difficulty(String label) { this.label = label; }
+        public String getLabel() { return label; }
+    }
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "exam_id", nullable = false)
     private OnlineExam exam;
@@ -22,4 +33,8 @@ public class Question extends BaseEntity {
 
     @Column(name = "score_weight")
     private Double scoreWeight = 1.0;
+
+    @Column(name = "difficulty", length = 20)
+    @Enumerated(EnumType.STRING)
+    private Difficulty difficulty = Difficulty.MEDIUM;
 }

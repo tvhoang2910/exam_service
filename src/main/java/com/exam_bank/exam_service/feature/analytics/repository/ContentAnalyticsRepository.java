@@ -24,29 +24,36 @@ public interface ContentAnalyticsRepository extends JpaRepository<QuestionReview
     QuestionStatProjection findQuestionStats(@Param("questionId") Long questionId);
 
     @Query(value = """
+            WITH exam_stats AS (
+                SELECT
+                    ea.id AS attempt_id,
+                    ea.exam_id,
+                    ea.score_percent,
+                    ea.user_id,
+                    NTILE(4) OVER (PARTITION BY ea.exam_id ORDER BY ea.score_percent) AS quartile
+                FROM exam_attempts ea
+                WHERE ea.status IN ('SUBMITTED', 'AUTO_SUBMITTED')
+            )
             SELECT
-                qre.item_id                       AS questionId,
-                COUNT(DISTINCT qre.attempt_id)    AS totalAttempts,
-                ROUND(SUM(CASE WHEN qre.is_correct = true THEN 1 ELSE 0 END)::numeric
+                qre.item_id                           AS questionId,
+                COUNT(DISTINCT qre.attempt_id)         AS totalAttempts,
+                ROUND(SUM(CASE WHEN qre.is_correct THEN 1 ELSE 0 END)::numeric
                       / NULLIF(COUNT(*), 0) * 100, 2) AS correctRate,
-                ROUND(AVG(qre.latency_ms), 0)    AS avgResponseTimeMs,
-                -- discrimination: % top-group correct - % bottom-group correct
-                (ROUND(SUM(CASE WHEN qre.is_correct = true
-                                AND percentile_rank(qre.score_percent::real)
-                                    OVER (PARTITION BY qre.attempt_id) >= 0.7
-                                THEN 1 ELSE 0 END)::numeric
-                      / NULLIF(SUM(CASE WHEN percentile_rank(qre.score_percent::real)
-                                          OVER (PARTITION BY qre.attempt_id) >= 0.7
-                                      THEN 1 ELSE 0 END), 0), 2)
-                 -
-                 ROUND(SUM(CASE WHEN qre.is_correct = true
-                                AND percentile_rank(qre.score_percent::real)
-                                    OVER (PARTITION BY qre.attempt_id) < 0.3
-                                THEN 1 ELSE 0 END)::numeric
-                      / NULLIF(SUM(CASE WHEN percentile_rank(qre.score_percent::real)
-                                          OVER (PARTITION BY qre.attempt_id) < 0.3
-                                      THEN 1 ELSE 0 END), 0), 2))
-                AS discriminationIndex
+                ROUND(AVG(qre.latency_ms), 0)          AS avgResponseTimeMs,
+                COALESCE(
+                    (SELECT ROUND(SUM(CASE WHEN qre2.is_correct THEN 1 ELSE 0 END)::numeric
+                              / NULLIF(COUNT(*), 0) * 100, 2)
+                     FROM question_review_events qre2
+                     JOIN exam_stats es2 ON es2.attempt_id = qre2.attempt_id
+                     WHERE qre2.item_id = :questionId AND es2.quartile = 4)
+                    -
+                    (SELECT ROUND(SUM(CASE WHEN qre3.is_correct THEN 1 ELSE 0 END)::numeric
+                              / NULLIF(COUNT(*), 0) * 100, 2)
+                     FROM question_review_events qre3
+                     JOIN exam_stats es3 ON es3.attempt_id = qre3.attempt_id
+                     WHERE qre3.item_id = :questionId AND es3.quartile = 1),
+                    0.0
+                )                                      AS discriminationIndex
             FROM question_review_events qre
             WHERE qre.item_id = :questionId
             GROUP BY qre.item_id

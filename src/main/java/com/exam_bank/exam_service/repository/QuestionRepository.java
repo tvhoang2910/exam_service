@@ -1,6 +1,8 @@
 package com.exam_bank.exam_service.repository;
 
 import com.exam_bank.exam_service.entity.Question;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -21,4 +23,6 @@ public interface QuestionRepository extends JpaRepository<Question, Long> {
     @Modifying
     @Query("delete from Question question where question.exam.id = :examId")
     void deleteByExamId(Long examId);
+
+    Page<Question> findByDifficulty(Question.Difficulty difficulty, Pageable pageable);
 }

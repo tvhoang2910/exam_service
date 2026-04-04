@@ -16,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import tools.jackson.databind.ObjectMapper;
@@ -70,9 +71,9 @@ class ExamSseServiceTest {
             examSseService.onExamSubmitted(2L, 2L, "Exam B", 20L);
 
             ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
-            verify(redisTemplate).convertAndSend(anyString(), jsonCaptor.capture());
+            verify(redisTemplate, times(2)).convertAndSend(anyString(), jsonCaptor.capture());
 
-            ExamSseEvent lastEvent = objectMapper.readValue(jsonCaptor.getValue(), ExamSseEvent.class);
+            ExamSseEvent lastEvent = objectMapper.readValue(jsonCaptor.getAllValues().get(1), ExamSseEvent.class);
             assertThat(lastEvent.getTotalSubmissionsToday()).isEqualTo(2);
         }
     }
@@ -107,9 +108,9 @@ class ExamSseServiceTest {
             examSseService.onAttemptStarted(2L, 1L);
 
             ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
-            verify(redisTemplate).convertAndSend(anyString(), jsonCaptor.capture());
+            verify(redisTemplate, times(2)).convertAndSend(anyString(), jsonCaptor.capture());
 
-            ExamSseEvent lastEvent = objectMapper.readValue(jsonCaptor.getValue(), ExamSseEvent.class);
+            ExamSseEvent lastEvent = objectMapper.readValue(jsonCaptor.getAllValues().get(1), ExamSseEvent.class);
             assertThat(lastEvent.getActiveAttemptCount()).isEqualTo(2);
         }
     }
@@ -127,9 +128,9 @@ class ExamSseServiceTest {
             examSseService.onAttemptEnded(30L);
 
             ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
-            verify(redisTemplate).convertAndSend(anyString(), jsonCaptor.capture());
+            verify(redisTemplate, times(2)).convertAndSend(anyString(), jsonCaptor.capture());
 
-            ExamSseEvent sent = objectMapper.readValue(jsonCaptor.getValue(), ExamSseEvent.class);
+            ExamSseEvent sent = objectMapper.readValue(jsonCaptor.getAllValues().get(1), ExamSseEvent.class);
             assertThat(sent.getEventType()).isEqualTo(ExamSseEvent.EventType.ATTEMPT_ENDED);
             assertThat(sent.getAttemptId()).isEqualTo(30L);
             assertThat(sent.getActiveAttemptCount()).isEqualTo(0);

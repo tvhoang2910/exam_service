@@ -29,7 +29,8 @@ public class ExamManagementService {
     private final ExamFlowCacheService examFlowCacheService;
 
     @Transactional
-    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams", "managedExamDetail" }, allEntries = true)
+    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
+            "managedExamDetail" }, allEntries = true)
     public ExamResponse createManualExam(CreateExamRequest request) {
         OnlineExam exam = buildExamEntity(new OnlineExam(), request);
         exam.setSource(OnlineExamSource.MANUAL_CREATED);
@@ -53,7 +54,8 @@ public class ExamManagementService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams", "managedExamDetail" }, allEntries = true)
+    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
+            "managedExamDetail" }, allEntries = true)
     public ExamResponse updateExam(Long examId, CreateExamRequest request) {
         OnlineExam existing = findExamOrThrow(examId);
 
@@ -82,7 +84,8 @@ public class ExamManagementService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams", "managedExamDetail" }, allEntries = true)
+    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
+            "managedExamDetail" }, allEntries = true)
     public void deleteExam(Long examId) {
         OnlineExam existing = findExamOrThrow(examId);
 
@@ -103,7 +106,8 @@ public class ExamManagementService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams", "managedExamDetail" }, allEntries = true)
+    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
+            "managedExamDetail" }, allEntries = true)
     public ExamResponse updateExamStatus(Long examId, OnlineExamStatus status) {
         OnlineExam existing = findExamOrThrow(examId);
         existing.setStatus(status);
@@ -297,8 +301,10 @@ public class ExamManagementService {
     }
 
     private boolean isTagSetChanged(Set<Tag> currentTags, Set<Tag> requestedTags) {
-        Set<Long> currentTagIds = currentTags.stream().map(Tag::getId).collect(HashSet::new, HashSet::add, HashSet::addAll);
-        Set<Long> requestedTagIds = requestedTags.stream().map(Tag::getId).collect(HashSet::new, HashSet::add, HashSet::addAll);
+        Set<Long> currentTagIds = currentTags.stream().map(Tag::getId).collect(HashSet::new, HashSet::add,
+                HashSet::addAll);
+        Set<Long> requestedTagIds = requestedTags.stream().map(Tag::getId).collect(HashSet::new, HashSet::add,
+                HashSet::addAll);
         return !Objects.equals(currentTagIds, requestedTagIds);
     }
 
@@ -309,9 +315,9 @@ public class ExamManagementService {
     }
 
     private ExamResponse mapExamToResponse(OnlineExam exam,
-                                           boolean includeQuestions,
-                                           boolean includeAnswerKey,
-                                           boolean includeTags) {
+            boolean includeQuestions,
+            boolean includeAnswerKey,
+            boolean includeTags) {
         ExamResponse response = new ExamResponse();
         response.setId(exam.getId());
         response.setTitle(exam.getTitle());
@@ -357,6 +363,8 @@ public class ExamManagementService {
             questionResponse.setContent(question.getContent());
             questionResponse.setExplanation(question.getExplanation());
             questionResponse.setScoreWeight(question.getScoreWeight());
+            questionResponse.setDifficulty(
+                    question.getDifficulty() == null ? Question.Difficulty.MEDIUM : question.getDifficulty());
 
             List<ExamResponse.OptionResponse> optionResponses = new ArrayList<>();
             for (QuestionOption option : optionsByQuestionId.getOrDefault(question.getId(), List.of())) {

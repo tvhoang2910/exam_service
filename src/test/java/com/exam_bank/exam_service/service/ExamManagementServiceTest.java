@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.List;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -234,5 +235,35 @@ class ExamManagementServiceTest {
         verify(optionRepo).deleteByQuestionIdIn(List.of(20L));
         verify(questionRepo).deleteByExamId(eq(examId));
         verify(examRepo).delete(exam);
+    }
+
+    @Test
+    void getManagedExamById_shouldIncludeQuestionDifficulty() {
+        Long examId = 12L;
+
+        OnlineExam exam = new OnlineExam();
+        exam.setId(examId);
+
+        Question question = new Question();
+        question.setId(33L);
+        question.setExam(exam);
+        question.setContent("Question with difficulty");
+        question.setScoreWeight(1.0);
+        question.setDifficulty(Question.Difficulty.HARD);
+
+        QuestionOption option = new QuestionOption();
+        option.setId(44L);
+        option.setQuestion(question);
+        option.setContent("Option A");
+        option.setIsCorrect(true);
+
+        when(examRepo.findById(examId)).thenReturn(Optional.of(exam));
+        when(questionRepo.findByExamIdOrderByIdAsc(examId)).thenReturn(List.of(question));
+        when(optionRepo.findByQuestionIdInOrderByIdAsc(List.of(33L))).thenReturn(List.of(option));
+
+        var response = examManagementService.getManagedExamById(examId);
+
+        assertEquals(1, response.getQuestions().size());
+        assertEquals(Question.Difficulty.HARD, response.getQuestions().getFirst().getDifficulty());
     }
 }
