@@ -14,7 +14,7 @@ import com.exam_bank.exam_service.entity.QuestionOption;
 public interface QuestionOptionRepository extends JpaRepository<QuestionOption, Long> {
     List<QuestionOption> findByQuestionIdInOrderByIdAsc(Collection<Long> questionIds);
 
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("delete from QuestionOption option where option.question.id in :questionIds")
     void deleteByQuestionIdIn(Collection<Long> questionIds);
 }

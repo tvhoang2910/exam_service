@@ -1,6 +1,7 @@
 package com.exam_bank.exam_service.dto;
 
 import com.exam_bank.exam_service.entity.ExamAttemptStatus;
+import com.exam_bank.exam_service.entity.Question;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -33,6 +34,8 @@ public class AttemptResultResponse {
         private Double maxScore;
         private Double earnedScore;
         private Boolean correct;
+        /** Độ khó cá nhân của user cho câu này, tính theo chất lượng trả lời. */
+        private Question.Difficulty difficulty;
         private List<OptionResult> options = new ArrayList<>();
         private List<Long> selectedOptionIds = new ArrayList<>();
         private List<Long> correctOptionIds = new ArrayList<>();

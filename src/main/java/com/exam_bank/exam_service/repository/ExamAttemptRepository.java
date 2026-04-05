@@ -15,13 +15,13 @@ import java.util.Optional;
 
 @Repository
 public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, Long> {
-    @EntityGraph(attributePaths = {"exam", "exam.tags"})
+    @EntityGraph(attributePaths = { "exam", "exam.tags" })
     Optional<ExamAttempt> findByIdAndUserId(Long id, Long userId);
 
     Optional<ExamAttempt> findFirstByExamIdAndUserIdAndStatusOrderByCreatedAtDesc(Long examId, Long userId,
             ExamAttemptStatus status);
 
-        @Query("""
+    @Query("""
             select attempt.id as attemptId,
                attempt.exam.id as examId,
                attempt.expiresAt as expiresAt
@@ -30,7 +30,7 @@ public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, Long> 
               and attempt.userId = :userId
               and attempt.status = :status
             """)
-        Optional<AttemptSaveContext> findSaveContext(Long attemptId, Long userId, ExamAttemptStatus status);
+    Optional<AttemptSaveContext> findSaveContext(Long attemptId, Long userId, ExamAttemptStatus status);
 
     long countByExamIdAndUserIdAndStatusIn(Long examId, Long userId, Collection<ExamAttemptStatus> statuses);
 
@@ -43,18 +43,19 @@ public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, Long> 
     @Query("delete from ExamAttempt attempt where attempt.exam.id = :examId")
     void deleteByExamId(Long examId);
 
-    @EntityGraph(attributePaths = {"exam", "exam.tags"})
+    @EntityGraph(attributePaths = { "exam", "exam.tags" })
     List<ExamAttempt> findByUserIdOrderByCreatedAtDesc(Long userId);
 
-        @EntityGraph(attributePaths = {"exam", "exam.tags"})
-        @Query("""
-                        select attempt
-                        from ExamAttempt attempt
-                        where attempt.userId = :userId
-                            and attempt.status in :statuses
-                        order by attempt.submittedAt desc, attempt.createdAt desc
-                        """)
-        List<ExamAttempt> findSubmittedHistoryByUserId(Long userId, Collection<ExamAttemptStatus> statuses);
+    @EntityGraph(attributePaths = { "exam", "exam.tags" })
+    @Query("""
+            select attempt
+            from ExamAttempt attempt
+            join fetch attempt.exam exam
+            where attempt.userId = :userId
+              and attempt.status in :statuses
+            order by attempt.submittedAt desc, attempt.createdAt desc
+            """)
+    List<ExamAttempt> findSubmittedHistoryByUserId(Long userId, Collection<ExamAttemptStatus> statuses);
 
     interface AttemptSaveContext {
         Long getAttemptId();

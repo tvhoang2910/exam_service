@@ -14,13 +14,17 @@ import java.util.List;
 public interface QuestionRepository extends JpaRepository<Question, Long> {
     java.util.Optional<Question> findByIdAndExamId(Long id, Long examId);
 
+    boolean existsByIdAndExamCreatedBy(Long id, String createdBy);
+
     List<Question> findByIdInAndExamId(List<Long> ids, Long examId);
 
     List<Question> findByExamIdOrderByIdAsc(Long examId);
 
+    List<Question> findByExamIdAndIsHiddenFalseOrderByIdAsc(Long examId);
+
     List<Question> findByExamIdInOrderByIdAsc(List<Long> examIds);
 
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("delete from Question question where question.exam.id = :examId")
     void deleteByExamId(Long examId);
 

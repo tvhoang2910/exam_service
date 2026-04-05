@@ -5,10 +5,14 @@ import com.exam_bank.exam_service.entity.OnlineExam;
 import com.exam_bank.exam_service.entity.OnlineExamStatus;
 import com.exam_bank.exam_service.entity.Question;
 import com.exam_bank.exam_service.entity.QuestionOption;
+import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportHistoryRepository;
+import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportRepository;
+import com.exam_bank.exam_service.repository.ExamAttemptAnswerRepository;
 import com.exam_bank.exam_service.repository.ExamAttemptRepository;
 import com.exam_bank.exam_service.repository.OnlineExamRepository;
 import com.exam_bank.exam_service.repository.QuestionOptionRepository;
 import com.exam_bank.exam_service.repository.QuestionRepository;
+import com.exam_bank.exam_service.repository.QuestionReviewEventRepository;
 import com.exam_bank.exam_service.repository.TagRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,11 +45,23 @@ class ExamManagementServiceTest {
     @Mock
     private QuestionOptionRepository optionRepo;
     @Mock
+    private ExamAttemptAnswerRepository examAttemptAnswerRepo;
+    @Mock
+    private QuestionReviewEventRepository questionReviewEventRepo;
+    @Mock
+    private QuestionReportRepository questionReportRepo;
+    @Mock
+    private QuestionReportHistoryRepository questionReportHistoryRepo;
+    @Mock
     private TagRepository tagRepo;
     @Mock
     private TagService tagService;
     @Mock
     private ExamFlowCacheService examFlowCacheService;
+    @Mock
+    private ExamAuditService examAuditService;
+    @Mock
+    private AuthenticatedUserService authenticatedUserService;
 
     @InjectMocks
     private ExamManagementService examManagementService;
@@ -196,24 +212,41 @@ class ExamManagementServiceTest {
     }
 
     @Test
-    void deleteExam_shouldSoftDeleteWhenAttemptsExist() {
+    void deleteExam_shouldHardDeleteAndCleanupWhenAttemptsExist() {
         Long examId = 3L;
         OnlineExam exam = new OnlineExam();
         exam.setId(examId);
         exam.setTitle("Sample exam");
 
+        Question question = new Question();
+        question.setId(20L);
+        question.setExam(exam);
+
         when(examRepo.findById(examId)).thenReturn(Optional.of(exam));
-        when(examAttemptRepo.countByExamId(examId)).thenReturn(2L);
+        when(questionRepo.findByExamIdOrderByIdAsc(examId)).thenReturn(List.of(question));
+        when(examAttemptRepo.findIdsByExamId(examId)).thenReturn(List.of(100L, 101L));
+        when(questionReportRepo.findIdsByAttemptIdIn(List.of(100L, 101L))).thenReturn(List.of(300L));
+        when(questionReportRepo.findIdsByQuestionIdIn(List.of(20L))).thenReturn(List.of(301L));
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(1L);
 
         examManagementService.deleteExam(examId);
 
-        verify(examRepo).save(exam);
-        verify(examRepo, never()).delete(any());
-        verify(examAttemptRepo, never()).deleteByExamId(any());
-        verify(questionRepo, never()).deleteByExamId(any());
-        verify(optionRepo, never()).deleteByQuestionIdIn(any());
-        org.junit.jupiter.api.Assertions.assertEquals(OnlineExamStatus.ARCHIVED, exam.getStatus());
-        org.junit.jupiter.api.Assertions.assertTrue(exam.getTitle().startsWith("[DELETED] "));
+        verify(examAuditService).log(
+                eq(ExamAuditService.ACTION_EXAM_DELETED),
+                eq(1L), eq(null),
+                eq(ExamAuditService.TARGET_EXAM),
+                eq(examId),
+                any(),
+                any());
+        verify(questionReportHistoryRepo).deleteByReportIdIn(any());
+        verify(questionReportRepo).deleteByAttemptIdIn(List.of(100L, 101L));
+        verify(questionReviewEventRepo).deleteByAttemptIdIn(List.of(100L, 101L));
+        verify(examAttemptAnswerRepo).deleteByAttemptIdIn(List.of(100L, 101L));
+        verify(examAttemptRepo).deleteByExamId(examId);
+        verify(questionReportRepo).deleteByQuestionIdIn(List.of(20L));
+        verify(optionRepo).deleteByQuestionIdIn(List.of(20L));
+        verify(questionRepo).deleteByExamId(eq(examId));
+        verify(examRepo).delete(exam);
     }
 
     @Test
@@ -227,11 +260,26 @@ class ExamManagementServiceTest {
         question.setExam(exam);
 
         when(examRepo.findById(examId)).thenReturn(Optional.of(exam));
-        when(examAttemptRepo.countByExamId(examId)).thenReturn(0L);
         when(questionRepo.findByExamIdOrderByIdAsc(examId)).thenReturn(List.of(question));
+        when(examAttemptRepo.findIdsByExamId(examId)).thenReturn(List.of());
+        when(questionReportRepo.findIdsByQuestionIdIn(List.of(20L))).thenReturn(List.of(200L));
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(1L);
 
         examManagementService.deleteExam(examId);
 
+        verify(examAuditService).log(
+                eq(ExamAuditService.ACTION_EXAM_DELETED),
+                eq(1L), eq(null),
+                eq(ExamAuditService.TARGET_EXAM),
+                eq(examId),
+                any(),
+                any());
+        verify(questionReportHistoryRepo).deleteByReportIdIn(List.of(200L));
+        verify(questionReportRepo, never()).deleteByAttemptIdIn(any());
+        verify(questionReviewEventRepo, never()).deleteByAttemptIdIn(any());
+        verify(examAttemptAnswerRepo, never()).deleteByAttemptIdIn(any());
+        verify(examAttemptRepo, never()).deleteByExamId(any());
+        verify(questionReportRepo).deleteByQuestionIdIn(List.of(20L));
         verify(optionRepo).deleteByQuestionIdIn(List.of(20L));
         verify(questionRepo).deleteByExamId(eq(examId));
         verify(examRepo).delete(exam);

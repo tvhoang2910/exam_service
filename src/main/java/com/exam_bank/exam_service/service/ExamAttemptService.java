@@ -436,6 +436,29 @@ public class ExamAttemptService {
         return 3;
     }
 
+    /**
+     * Map answer quality to user-specific difficulty based on performance in this attempt.
+     * Unlike the global Question.difficulty (which needs ≥10 historical attempts),
+     * this is per-attempt difficulty so users immediately see feedback.
+     */
+    private Question.Difficulty mapQualityToDifficulty(ExamAttemptAnswer answer) {
+        if (answer == null) {
+            return Question.Difficulty.MEDIUM;
+        }
+        int quality = mapQuality(answer, decodeOptionIds(answer.getSelectedOptionIds()));
+        // quality 5 = fast & correct → Easy for this user
+        if (quality >= 4) {
+            return Question.Difficulty.EASY;
+        }
+        // quality 3 = slow but correct → Medium for this user
+        if (quality >= 3) {
+            return Question.Difficulty.MEDIUM;
+        }
+        // quality 1 = wrong → Hard for this user
+        // quality 0 = skipped → Very Hard for this user
+        return quality == 0 ? Question.Difficulty.VERY_HARD : Question.Difficulty.HARD;
+    }
+
     // Overload: use pre-loaded data (avoids redundant DB query in submitAttempt
     // path)
     private AttemptResultResponse buildAttemptResult(ExamAttempt attempt,
@@ -483,6 +506,8 @@ public class ExamAttemptService {
             item.setCorrect(answer != null && Boolean.TRUE.equals(answer.getIsCorrect()));
             item.setResponseTimeMs(answer == null ? null : answer.getResponseTimeMs());
             item.setAnswerChangeCount(answer == null ? 0 : answer.getAnswerChangeCount());
+            // Độ khó cá nhân: dựa trên quality của user cho câu này
+            item.setDifficulty(mapQualityToDifficulty(answer));
 
             List<AttemptResultResponse.OptionResult> optionResults = questionBank.optionsByQuestionId()
                     .getOrDefault(question.questionId(), List.of())
@@ -562,7 +587,7 @@ public class ExamAttemptService {
     }
 
     private ExamFlowCacheService.QuestionBankSnapshot loadQuestionBankSnapshot(Long examId) {
-        List<Question> questions = questionRepository.findByExamIdOrderByIdAsc(examId);
+        List<Question> questions = questionRepository.findByExamIdAndIsHiddenFalseOrderByIdAsc(examId);
         if (questions.isEmpty()) {
             return ExamFlowCacheService.QuestionBankSnapshot.empty();
         }

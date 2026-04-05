@@ -4,7 +4,10 @@ import com.exam_bank.exam_service.dto.CreateExamRequest;
 import com.exam_bank.exam_service.dto.ExamResponse;
 import com.exam_bank.exam_service.dto.TagDto;
 import com.exam_bank.exam_service.entity.*;
+import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportHistoryRepository;
+import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportRepository;
 import com.exam_bank.exam_service.repository.*;
+import com.exam_bank.exam_service.service.ExamAuditService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
@@ -24,9 +27,15 @@ public class ExamManagementService {
     private final ExamAttemptRepository examAttemptRepo;
     private final QuestionRepository questionRepo;
     private final QuestionOptionRepository optionRepo;
+    private final ExamAttemptAnswerRepository examAttemptAnswerRepo;
+    private final QuestionReviewEventRepository questionReviewEventRepo;
+    private final QuestionReportRepository questionReportRepo;
+    private final QuestionReportHistoryRepository questionReportHistoryRepo;
     private final TagRepository tagRepo;
     private final TagService tagService;
     private final ExamFlowCacheService examFlowCacheService;
+    private final ExamAuditService examAuditService;
+    private final AuthenticatedUserService authenticatedUserService;
 
     @Transactional
     @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
@@ -43,6 +52,7 @@ public class ExamManagementService {
 
     @Transactional(readOnly = true)
     public List<ExamResponse> getManagedExams() {
+        // Include all statuses: DRAFT, PUBLISHED, ARCHIVED
         List<OnlineExam> exams = examRepo.findAllByOrderByCreatedAtDesc();
         return mapExamListToSummary(exams);
     }
@@ -88,21 +98,48 @@ public class ExamManagementService {
             "managedExamDetail" }, allEntries = true)
     public void deleteExam(Long examId) {
         OnlineExam existing = findExamOrThrow(examId);
+        List<Question> existingQuestions = questionRepo.findByExamIdOrderByIdAsc(examId);
+        List<Long> questionIds = existingQuestions.stream().map(BaseEntity::getId).toList();
+        List<Long> attemptIds = examAttemptRepo.findIdsByExamId(examId);
 
-        if (examAttemptRepo.countByExamId(examId) > 0) {
-            existing.setStatus(OnlineExamStatus.ARCHIVED);
-            if (existing.getTitle() != null && !existing.getTitle().startsWith("[DELETED] ")) {
-                existing.setTitle("[DELETED] " + existing.getTitle());
-            }
-            examRepo.save(existing);
-            examFlowCacheService.evictExam(examId);
-            return;
+        Set<Long> reportIds = new LinkedHashSet<>();
+        if (!attemptIds.isEmpty()) {
+            reportIds.addAll(questionReportRepo.findIdsByAttemptIdIn(attemptIds));
+        }
+        if (!questionIds.isEmpty()) {
+            reportIds.addAll(questionReportRepo.findIdsByQuestionIdIn(questionIds));
         }
 
-        List<Question> existingQuestions = questionRepo.findByExamIdOrderByIdAsc(examId);
-        deleteQuestionsAndOptions(existingQuestions);
+        if (!reportIds.isEmpty()) {
+            questionReportHistoryRepo.deleteByReportIdIn(new ArrayList<>(reportIds));
+        }
+
+        if (!attemptIds.isEmpty()) {
+            questionReportRepo.deleteByAttemptIdIn(attemptIds);
+            questionReviewEventRepo.deleteByAttemptIdIn(attemptIds);
+            examAttemptAnswerRepo.deleteByAttemptIdIn(attemptIds);
+            examAttemptRepo.deleteByExamId(examId);
+        }
+
+        if (!questionIds.isEmpty()) {
+            questionReportRepo.deleteByQuestionIdIn(questionIds);
+            optionRepo.deleteByQuestionIdIn(questionIds);
+            questionRepo.deleteByExamId(examId);
+        }
+
+        String examTitle = existing.getTitle();
+        Long examIdForAudit = existing.getId();
         examRepo.delete(existing);
         examFlowCacheService.evictExam(examId);
+
+        examAuditService.log(
+                ExamAuditService.ACTION_EXAM_DELETED,
+                authenticatedUserService.getCurrentUserId(),
+                null,
+                ExamAuditService.TARGET_EXAM,
+                examIdForAudit,
+                examTitle,
+                "Đề thi bị xóa vĩnh viễn khỏi DB");
     }
 
     @Transactional
@@ -110,9 +147,20 @@ public class ExamManagementService {
             "managedExamDetail" }, allEntries = true)
     public ExamResponse updateExamStatus(Long examId, OnlineExamStatus status) {
         OnlineExam existing = findExamOrThrow(examId);
+        OnlineExamStatus previousStatus = existing.getStatus();
         existing.setStatus(status);
         OnlineExam saved = examRepo.save(existing);
         examFlowCacheService.evictExam(examId);
+
+        examAuditService.log(
+                ExamAuditService.ACTION_EXAM_STATUS_CHANGED,
+                authenticatedUserService.getCurrentUserId(),
+                null,
+                ExamAuditService.TARGET_EXAM,
+                examId,
+                existing.getTitle(),
+                "Trạng thái thay đổi: " + previousStatus + " → " + status);
+
         return mapExamToResponse(saved, false, true, false);
     }
 
@@ -342,7 +390,9 @@ public class ExamManagementService {
             return response;
         }
 
-        List<Question> questions = questionRepo.findByExamIdOrderByIdAsc(exam.getId());
+        List<Question> questions = includeAnswerKey
+                ? questionRepo.findByExamIdOrderByIdAsc(exam.getId())
+                : questionRepo.findByExamIdAndIsHiddenFalseOrderByIdAsc(exam.getId());
         if (questions.isEmpty()) {
             return response;
         }
