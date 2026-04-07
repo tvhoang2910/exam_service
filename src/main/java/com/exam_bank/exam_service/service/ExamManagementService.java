@@ -7,7 +7,6 @@ import com.exam_bank.exam_service.entity.*;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportHistoryRepository;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportRepository;
 import com.exam_bank.exam_service.repository.*;
-import com.exam_bank.exam_service.service.ExamAuditService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;

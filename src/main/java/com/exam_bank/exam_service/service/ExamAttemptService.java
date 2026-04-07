@@ -45,7 +45,6 @@ import com.exam_bank.exam_service.repository.OnlineExamRepository;
 import com.exam_bank.exam_service.repository.QuestionOptionRepository;
 import com.exam_bank.exam_service.repository.QuestionRepository;
 import com.exam_bank.exam_service.repository.QuestionReviewEventRepository;
-import com.exam_bank.exam_service.service.Sm2Service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -313,7 +312,7 @@ public class ExamAttemptService {
         examAttemptRepository.save(attempt);
 
         createReviewEvents(attempt, questions, answerByQuestionId);
-        publishExamSubmittedEvent(attempt, questions, answerByQuestionId);
+        publishExamSubmittedEvent(attempt, questionBank, answerByQuestionId);
 
         // Publish admin alert
         adminAlertPublisher.publishExamSubmittedAlert(
@@ -326,7 +325,7 @@ public class ExamAttemptService {
     }
 
     private void publishExamSubmittedEvent(ExamAttempt attempt,
-            List<ExamFlowCacheService.QuestionSnapshot> questions,
+            ExamFlowCacheService.QuestionBankSnapshot questionBank,
             Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         ExamSubmittedEvent event = new ExamSubmittedEvent();
         event.setAttemptId(attempt.getId());
@@ -340,13 +339,20 @@ public class ExamAttemptService {
         event.setDurationSeconds(attempt.getDurationSeconds());
 
         List<QuestionAnswered> questionEvents = new ArrayList<>();
-        for (ExamFlowCacheService.QuestionSnapshot qs : questions) {
+        for (ExamFlowCacheService.QuestionSnapshot qs : questionBank.questions()) {
             ExamAttemptAnswer answer = answerByQuestionId.get(qs.questionId());
+            String selectedOptionIds = encodeOptionIds(
+                    decodeOptionIds(answer == null ? null : answer.getSelectedOptionIds()));
+            String correctOptionIds = encodeOptionIds(questionBank.correctOptionIdsByQuestionId()
+                    .getOrDefault(qs.questionId(), Set.of()));
+
             QuestionAnswered qe = new QuestionAnswered();
             qe.setQuestionId(qs.questionId());
             qe.setIsCorrect(Boolean.TRUE.equals(answer != null ? answer.getIsCorrect() : null));
             qe.setEarnedScore(answer == null ? 0.0 : answer.getEarnedScore());
             qe.setMaxScore(qs.scoreWeight() == null ? 1.0 : qs.scoreWeight());
+            qe.setSelectedOptionIds(selectedOptionIds);
+            qe.setCorrectOptionIds(correctOptionIds);
             qe.setResponseTimeMs(answer == null ? null : answer.getResponseTimeMs());
             qe.setAnswerChangeCount(answer == null ? 0 : answer.getAnswerChangeCount());
             qe.setDifficulty(qs.scoreWeight() == null ? 1.0 : qs.scoreWeight());
@@ -437,7 +443,8 @@ public class ExamAttemptService {
     }
 
     /**
-     * Map answer quality to user-specific difficulty based on performance in this attempt.
+     * Map answer quality to user-specific difficulty based on performance in this
+     * attempt.
      * Unlike the global Question.difficulty (which needs ≥10 historical attempts),
      * this is per-attempt difficulty so users immediately see feedback.
      */

@@ -1,6 +1,5 @@
 package com.exam_bank.exam_service.service;
 
-import com.exam_bank.exam_service.repository.QuestionRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import lombok.RequiredArgsConstructor;
@@ -14,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class DifficultyRecalculationService {
 
-    private final QuestionRepository questionRepository;
     private final EntityManager entityManager;
 
     private static final int MIN_ATTEMPTS = 10;

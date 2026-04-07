@@ -32,6 +32,8 @@ public class ExamSubmittedEvent {
         private Boolean isCorrect;
         private Double earnedScore;
         private Double maxScore;
+        private String selectedOptionIds; // comma-separated
+        private String correctOptionIds; // comma-separated
         private Long responseTimeMs;
         private Integer answerChangeCount;
         private Double difficulty;

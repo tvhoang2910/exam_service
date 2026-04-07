@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
@@ -34,7 +35,18 @@ public class ApiExceptionHandler {
             HttpServletRequest request) {
         HttpStatus status = HttpStatus.CONFLICT;
         String reason = "Operation violates data integrity constraints.";
-        log.warn("Data integrity violation on {}: {}", request.getRequestURI(), exception.getMostSpecificCause().getMessage());
+        log.warn("Data integrity violation on {}: {}", request.getRequestURI(),
+                exception.getMostSpecificCause().getMessage());
+        return ResponseEntity.status(status).body(buildErrorBody(status, reason, request));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNoResourceFound(
+            NoResourceFoundException exception,
+            HttpServletRequest request) {
+        HttpStatus status = HttpStatus.NOT_FOUND;
+        String reason = exception.getMessage() == null ? "Resource not found." : exception.getMessage();
+        log.warn("Resource not found on {}: {}", request.getRequestURI(), reason);
         return ResponseEntity.status(status).body(buildErrorBody(status, reason, request));
     }
 

@@ -26,7 +26,6 @@ import tools.jackson.databind.ObjectMapper;
 public class ExamSseService implements MessageListener {
 
     private static final String EXAM_EVENTS_CHANNEL = "exam:events";
-    private static final long SSE_TIMEOUT_MS = 8L * 60 * 60 * 1000; // 8 hours
 
     private final StringRedisTemplate redisTemplate;
     private final RedisMessageListenerContainer redisContainer;
