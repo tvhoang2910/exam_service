@@ -69,6 +69,7 @@ public class ExamAttemptService {
     private final RabbitMQEventPublisher rabbitMQEventPublisher;
     private final AdminAlertPublisher adminAlertPublisher;
     private final ExamSseService examSseService;
+    private final AuthUserLookupClient authUserLookupClient;
 
     @Transactional(readOnly = true)
     public ExamResponse getAttemptView(Long examId) {
@@ -315,8 +316,10 @@ public class ExamAttemptService {
         publishExamSubmittedEvent(attempt, questionBank, answerByQuestionId);
 
         // Publish admin alert
+        String userDisplayName = authUserLookupClient.findDisplayNameByUserId(attempt.getUserId())
+            .orElse("Thành viên");
         adminAlertPublisher.publishExamSubmittedAlert(
-                "Người dùng #" + attempt.getUserId(),
+            userDisplayName,
                 attempt.getExam().getId(),
                 attempt.getExam().getTitle(),
                 attempt.getId());
