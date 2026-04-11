@@ -122,6 +122,7 @@ class ExamSubmittedEventContractTest {
         return event;
     }
 
+    @SuppressWarnings("unused")
     private static class StudyCompatibleEvent {
         public Long attemptId;
         public Long userId;
@@ -136,6 +137,7 @@ class ExamSubmittedEventContractTest {
         public List<StudyCompatibleTag> examTags;
     }
 
+    @SuppressWarnings("unused")
     private static class StudyCompatibleQuestion {
         public Long questionId;
         public Boolean isCorrect;
@@ -149,6 +151,7 @@ class ExamSubmittedEventContractTest {
         public String tagIds;
     }
 
+    @SuppressWarnings("unused")
     private static class StudyCompatibleTag {
         public Long tagId;
         public String tagName;
