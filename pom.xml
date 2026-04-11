@@ -101,7 +101,7 @@
         </dependency>
         <dependency>
             <groupId>com.exam_bank</groupId>
-            <artifactId>notification_service</artifactId>
+            <artifactId>notification_contract</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

@@ -70,19 +70,21 @@ public class ExamAttemptService {
     private final AdminAlertPublisher adminAlertPublisher;
     private final ExamSseService examSseService;
     private final AuthUserLookupClient authUserLookupClient;
+    private final AuthenticatedUserService authenticatedUserService;
 
     @Transactional(readOnly = true)
     public ExamResponse getAttemptView(Long examId) {
-        return examFlowCacheService.getOrLoadAttemptView(examId, () -> {
-            OnlineExam exam = examRepository.findById(examId)
-                    .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Exam not found"));
+        OnlineExam exam = examRepository.findById(examId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Exam not found"));
 
-            if (exam.getStatus() != OnlineExamStatus.PUBLISHED) {
-                throw new ResponseStatusException(NOT_FOUND, "Exam not found");
-            }
+        if (exam.getStatus() != OnlineExamStatus.PUBLISHED) {
+            throw new ResponseStatusException(NOT_FOUND, "Exam not found");
+        }
 
-            return examManagementService.mapPublicAttemptView(exam);
-        });
+        Optional<Long> userId = authenticatedUserService.getCurrentUserIdOptional();
+        boolean premiumLocked = isPremiumExamLockedForUser(exam, userId.orElse(null));
+        Integer questionLimit = premiumLocked ? resolveTeaserQuestionCount(exam) : null;
+        return examManagementService.mapPublicAttemptView(exam, questionLimit, premiumLocked);
     }
 
     @Transactional
@@ -93,6 +95,12 @@ public class ExamAttemptService {
         if (exam.getStatus() != OnlineExamStatus.PUBLISHED) {
             log.warn("Start attempt rejected: exam {} is not published for user {}", exam.getId(), userId);
             throw new ResponseStatusException(BAD_REQUEST, "Exam is not available for attempts");
+        }
+
+        if (isPremiumExamLockedForUser(exam, userId)) {
+            log.warn("Start attempt rejected: premium exam {} locked for user {}", exam.getId(), userId);
+            throw new ResponseStatusException(FORBIDDEN,
+                    "Premium exam requires an active Premium subscription. Please upgrade to continue.");
         }
 
         Optional<ExamAttempt> inProgressOpt = examAttemptRepository
@@ -317,9 +325,9 @@ public class ExamAttemptService {
 
         // Publish admin alert
         String userDisplayName = authUserLookupClient.findDisplayNameByUserId(attempt.getUserId())
-            .orElse("Thành viên");
+                .orElse("Thành viên");
         adminAlertPublisher.publishExamSubmittedAlert(
-            userDisplayName,
+                userDisplayName,
                 attempt.getExam().getId(),
                 attempt.getExam().getTitle(),
                 attempt.getId());
@@ -639,5 +647,31 @@ public class ExamAttemptService {
 
         // For larger values, keep backward-compatible absolute-point semantics.
         return passingScore;
+    }
+
+    private boolean isPremiumExamLockedForUser(OnlineExam exam, Long userId) {
+        if (!Boolean.TRUE.equals(exam.getIsPremium())) {
+            return false;
+        }
+
+        return !isPremiumUser(userId);
+    }
+
+    private boolean isPremiumUser(Long userId) {
+        if (userId == null || userId <= 0) {
+            return false;
+        }
+
+        return authUserLookupClient.findPremiumStatusByUserId(userId)
+                .orElse(false);
+    }
+
+    private int resolveTeaserQuestionCount(OnlineExam exam) {
+        Integer configured = exam.getTeaserQuestionCount();
+        if (configured == null) {
+            return 2;
+        }
+
+        return Math.max(1, Math.min(2, configured));
     }
 }

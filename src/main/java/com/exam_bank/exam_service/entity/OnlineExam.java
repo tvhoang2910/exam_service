@@ -74,4 +74,12 @@ public class OnlineExam extends BaseEntity {
         @Column(name = "is_randomized", comment = "Co tron thu tu cau hoi hay khong")
         @ColumnDefault("false")
         private Boolean isRandomized = false;
+
+        @Column(name = "is_premium", nullable = false, comment = "Danh dau de thi chi danh cho tai khoan Premium")
+        @ColumnDefault("false")
+        private Boolean isPremium = false;
+
+        @Column(name = "teaser_question_count", nullable = false, comment = "So cau xem thu cho nguoi dung khong Premium")
+        @ColumnDefault("2")
+        private Integer teaserQuestionCount = 2;
 }

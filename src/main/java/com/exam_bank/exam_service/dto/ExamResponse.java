@@ -19,6 +19,9 @@ public class ExamResponse {
     private Integer passingScore;
     private Integer maxAttempts;
     private Integer totalQuestions;
+    private Boolean premium;
+    private Integer teaserQuestionCount;
+    private Boolean premiumLocked;
     private OnlineExamStatus status;
     private Instant createdAt;
     private Instant modifiedAt;

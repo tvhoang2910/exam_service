@@ -1,6 +1,6 @@
 package com.exam_bank.exam_service.service;
 
-import com.exam_bank.notification_service.dto.AdminAlertMessage;
+import com.exam_bank.notification_contract.dto.AdminAlertMessage;
 import com.exam_bank.exam_service.feature.reporting.entity.ReportType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -67,3 +67,4 @@ public class AdminAlertPublisher {
                 totalOpenReports);
     }
 }
+

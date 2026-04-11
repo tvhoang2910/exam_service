@@ -22,6 +22,10 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @RequiredArgsConstructor
 public class ExamManagementService {
 
+    private static final int DEFAULT_TEASER_QUESTION_COUNT = 2;
+    private static final int MIN_TEASER_QUESTION_COUNT = 1;
+    private static final int MAX_TEASER_QUESTION_COUNT = 2;
+
     private final OnlineExamRepository examRepo;
     private final ExamAttemptRepository examAttemptRepo;
     private final QuestionRepository questionRepo;
@@ -46,7 +50,7 @@ public class ExamManagementService {
         OnlineExam savedExam = examRepo.save(exam);
         upsertQuestions(savedExam, request.getQuestions());
         examFlowCacheService.evictExam(savedExam.getId());
-        return mapExamToResponse(savedExam, false, true, true);
+        return mapExamToResponse(savedExam, false, true, true, null, false);
     }
 
     @Transactional(readOnly = true)
@@ -59,7 +63,7 @@ public class ExamManagementService {
     @Transactional(readOnly = true)
     public ExamResponse getManagedExamById(Long examId) {
         OnlineExam exam = findExamOrThrow(examId);
-        return mapExamToResponse(exam, true, true, true);
+        return mapExamToResponse(exam, true, true, true, null, false);
     }
 
     @Transactional
@@ -89,7 +93,7 @@ public class ExamManagementService {
 
         examFlowCacheService.evictExam(updatedExam.getId());
 
-        return mapExamToResponse(updatedExam, false, true, true);
+        return mapExamToResponse(updatedExam, false, true, true, null, false);
     }
 
     @Transactional
@@ -160,13 +164,13 @@ public class ExamManagementService {
                 existing.getTitle(),
                 "Trạng thái thay đổi: " + previousStatus + " → " + status);
 
-        return mapExamToResponse(saved, false, true, false);
+        return mapExamToResponse(saved, false, true, false, null, false);
     }
 
     @Transactional(readOnly = true)
     public List<ExamResponse> getPublicExams() {
         List<OnlineExam> exams = examRepo.findByStatusOrderByCreatedAtDesc(OnlineExamStatus.PUBLISHED);
-        return exams.stream().map(exam -> mapExamToResponse(exam, false, false, true)).toList();
+        return exams.stream().map(exam -> mapExamToResponse(exam, false, false, true, null, false)).toList();
     }
 
     @Transactional(readOnly = true)
@@ -175,12 +179,12 @@ public class ExamManagementService {
         if (exam.getStatus() != OnlineExamStatus.PUBLISHED) {
             throw new ResponseStatusException(NOT_FOUND, "Exam not found");
         }
-        return mapExamToResponse(exam, false, false, true);
+        return mapExamToResponse(exam, false, false, true, null, false);
     }
 
     @Transactional(readOnly = true)
-    public ExamResponse mapPublicAttemptView(OnlineExam exam) {
-        return mapExamToResponse(exam, true, false, true);
+    public ExamResponse mapPublicAttemptView(OnlineExam exam, Integer questionLimit, boolean premiumLocked) {
+        return mapExamToResponse(exam, true, false, true, questionLimit, premiumLocked);
     }
 
     private OnlineExam findExamOrThrow(Long examId) {
@@ -195,6 +199,8 @@ public class ExamManagementService {
         exam.setPassingScore(request.getPassingScore());
         Integer requestedMaxAttempts = request.getMaxAttempts();
         exam.setMaxAttempts(requestedMaxAttempts == null ? 100 : Math.max(1, requestedMaxAttempts));
+        exam.setIsPremium(Boolean.TRUE.equals(request.getPremium()));
+        exam.setTeaserQuestionCount(resolveTeaserQuestionCount(request.getTeaserQuestionCount()));
 
         Set<Tag> examTags = resolveExamTags(request.getTagIds(), request.getNewTags());
         if (exam.getTags() == null) {
@@ -357,14 +363,16 @@ public class ExamManagementService {
 
     private List<ExamResponse> mapExamListToSummary(List<OnlineExam> exams) {
         return exams.stream()
-                .map(exam -> mapExamToResponse(exam, false, true, true))
+                .map(exam -> mapExamToResponse(exam, false, true, true, null, false))
                 .toList();
     }
 
     private ExamResponse mapExamToResponse(OnlineExam exam,
             boolean includeQuestions,
             boolean includeAnswerKey,
-            boolean includeTags) {
+            boolean includeTags,
+            Integer questionLimit,
+            boolean premiumLocked) {
         ExamResponse response = new ExamResponse();
         response.setId(exam.getId());
         response.setTitle(exam.getTitle());
@@ -373,6 +381,9 @@ public class ExamManagementService {
         response.setPassingScore(exam.getPassingScore());
         response.setMaxAttempts(exam.getMaxAttempts());
         response.setTotalQuestions(exam.getTotalQuestions());
+        response.setPremium(Boolean.TRUE.equals(exam.getIsPremium()));
+        response.setTeaserQuestionCount(resolveTeaserQuestionCount(exam.getTeaserQuestionCount()));
+        response.setPremiumLocked(premiumLocked);
         response.setStatus(exam.getStatus());
         response.setCreatedAt(exam.getCreatedAt());
         response.setModifiedAt(exam.getModifiedAt());
@@ -394,6 +405,10 @@ public class ExamManagementService {
                 : questionRepo.findByExamIdAndIsHiddenFalseOrderByIdAsc(exam.getId());
         if (questions.isEmpty()) {
             return response;
+        }
+
+        if (questionLimit != null && questionLimit > 0 && questions.size() > questionLimit) {
+            questions = new ArrayList<>(questions.subList(0, questionLimit));
         }
 
         List<Long> questionIds = questions.stream().map(BaseEntity::getId).toList();
@@ -430,5 +445,13 @@ public class ExamManagementService {
 
         response.setQuestions(questionResponses);
         return response;
+    }
+
+    private int resolveTeaserQuestionCount(Integer requestedValue) {
+        if (requestedValue == null) {
+            return DEFAULT_TEASER_QUESTION_COUNT;
+        }
+
+        return Math.max(MIN_TEASER_QUESTION_COUNT, Math.min(MAX_TEASER_QUESTION_COUNT, requestedValue));
     }
 }

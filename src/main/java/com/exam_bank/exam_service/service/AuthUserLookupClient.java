@@ -57,6 +57,38 @@ public class AuthUserLookupClient {
         }
     }
 
+    public Optional<Boolean> findPremiumStatusByUserId(Long userId) {
+        if (userId == null || userId <= 0) {
+            return Optional.empty();
+        }
+
+        String url = authServiceBaseUrl + "/api/v1/auth/internal/users/{userId}/premium-status";
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Internal-Token", internalToken);
+
+        try {
+            ResponseEntity<UserPremiumStatusResponse> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    UserPremiumStatusResponse.class,
+                    userId);
+
+            UserPremiumStatusResponse body = response.getBody();
+            if (body == null) {
+                return Optional.empty();
+            }
+
+            return Optional.of(body.premium());
+        } catch (Exception exception) {
+            log.warn("Failed to resolve premium status for userId {}: {}", userId, exception.getMessage());
+            return Optional.empty();
+        }
+    }
+
     private record UserDisplayNameResponse(Long userId, String fullName) {
+    }
+
+    private record UserPremiumStatusResponse(Long userId, boolean premium) {
     }
 }
