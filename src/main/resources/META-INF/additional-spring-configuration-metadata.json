@@ -29,6 +29,21 @@
             "name": "auth.service.internal-token",
             "type": "java.lang.String",
             "description": "A description for 'auth.service.internal-token'"
+        },
+        {
+            "name": "auth.events.exchange",
+            "type": "java.lang.String",
+            "description": "RabbitMQ exchange for auth profile synchronization events."
+        },
+        {
+            "name": "auth.events.user-profile-sync-routing-key",
+            "type": "java.lang.String",
+            "description": "Routing key used to bind user profile sync events from auth service."
+        },
+        {
+            "name": "auth.events.user-profile-sync.queue",
+            "type": "java.lang.String",
+            "description": "Queue name receiving user profile synchronization events for exam service."
         }
     ]
 }

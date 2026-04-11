@@ -30,9 +30,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.CONFLICT;
@@ -164,6 +166,13 @@ public class QuestionReportService {
             throw new ResponseStatusException(NOT_FOUND, "Không có báo cáo đang chờ xử lý cho câu hỏi này");
         }
 
+        Set<Long> reporterUserIds = new LinkedHashSet<>();
+        for (QuestionReport report : openReports) {
+            if (report.getReporterId() != null && report.getReporterId() > 0) {
+                reporterUserIds.add(report.getReporterId());
+            }
+        }
+
         String resolutionNote = request.getResolutionNote() == null ? null : request.getResolutionNote().trim();
         Instant resolvedAt = Instant.now();
 
@@ -207,6 +216,19 @@ public class QuestionReportService {
 
         log.info("resolveQuestionReports: questionId={}, handledReports={}, status={}",
                 questionId, openReports.size(), request.getStatus());
+
+        if (request.getStatus() == ReportStatus.RESOLVED && !reporterUserIds.isEmpty()) {
+            Question question = firstReport.getQuestion();
+            Long examId = question.getExam() != null ? question.getExam().getId() : null;
+            String examTitle = question.getExam() != null ? question.getExam().getTitle() : null;
+            adminAlertPublisher.publishQuestionReportResolvedAlert(
+                    List.copyOf(reporterUserIds),
+                    examId,
+                    examTitle,
+                    questionId,
+                    openReports.size(),
+                    resolutionNote);
+        }
 
         String action = request.getStatus() == ReportStatus.RESOLVED
                 ? ExamAuditService.ACTION_REPORT_RESOLVED
