@@ -32,6 +32,6 @@ ENV APP_PORT=8082
 EXPOSE 8082
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD sh -c "PORT_TO_CHECK=${SERVER_PORT:-${PORT:-${APP_PORT}}}; nc -z 127.0.0.1 ${PORT_TO_CHECK} || exit 1"
+    CMD sh -c "nc -z 127.0.0.1 ${APP_PORT} || exit 1"
 
-ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:InitialRAMPercentage=50.0", "-XX:MaxRAMPercentage=75.0", "-XX:+UseG1GC", "-XX:+ExitOnOutOfMemoryError", "org.springframework.boot.loader.JarLauncher"]
+ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:InitialRAMPercentage=50.0", "-XX:MaxRAMPercentage=75.0", "-XX:+UseG1GC", "-XX:+ExitOnOutOfMemoryError", "org.springframework.boot.loader.launch.JarLauncher"]
