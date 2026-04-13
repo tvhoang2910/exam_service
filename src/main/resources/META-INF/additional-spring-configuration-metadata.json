@@ -44,6 +44,21 @@
             "name": "auth.events.user-profile-sync.queue",
             "type": "java.lang.String",
             "description": "Queue name receiving user profile synchronization events for exam service."
+        },
+        {
+            "name": "exam.events.exchange",
+            "type": "java.lang.String",
+            "description": "RabbitMQ exchange for exam submitted events."
+        },
+        {
+            "name": "exam.events.routing-key",
+            "type": "java.lang.String",
+            "description": "Routing key used by exam_service when publishing exam submitted events."
+        },
+        {
+            "name": "exam.events.queue",
+            "type": "java.lang.String",
+            "description": "Queue name used for exam events in exam_service topology declarations."
         }
     ]
 }

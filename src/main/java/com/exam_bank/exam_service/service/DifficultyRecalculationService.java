@@ -29,38 +29,40 @@ public class DifficultyRecalculationService {
     }
 
     /**
-     * Recalculates difficulty for ALL questions that have >= MIN_ATTEMPTS answer records.
+     * Recalculates difficulty for ALL questions that have >= MIN_ATTEMPTS answer
+     * records.
      * Uses a single native UPDATE query for efficiency.
+     * 
      * @return number of questions updated
      */
     @Transactional
     public int recalculateAll() {
         String sql = """
-            UPDATE questions q
-            SET difficulty = CASE
-                WHEN r.correct_rate >= 80 THEN 'EASY'
-                WHEN r.correct_rate >= 50 THEN 'MEDIUM'
-                WHEN r.correct_rate >= 20 THEN 'HARD'
-                ELSE 'VERY_HARD'
-              END,
-                updated_at = NOW()
-            FROM (
-                SELECT item_id,
-                       ROUND(SUM(CASE WHEN is_correct THEN 1 ELSE 0 END)::numeric
-                             / NULLIF(COUNT(*), 0) * 100, 2) AS correct_rate
-                FROM question_review_events
-                GROUP BY item_id
-                HAVING COUNT(*) >= :minAttempts
-            ) r
-            WHERE q.id = r.item_id
-              AND (q.difficulty IS NULL
-                   OR q.difficulty != CASE
-                       WHEN r.correct_rate >= 80 THEN 'EASY'
-                       WHEN r.correct_rate >= 50 THEN 'MEDIUM'
-                       WHEN r.correct_rate >= 20 THEN 'HARD'
-                       ELSE 'VERY_HARD'
-                   END)
-            """;
+                UPDATE questions q
+                SET difficulty = CASE
+                    WHEN r.correct_rate >= 80 THEN 'EASY'
+                    WHEN r.correct_rate >= 50 THEN 'MEDIUM'
+                    WHEN r.correct_rate >= 20 THEN 'HARD'
+                    ELSE 'VERY_HARD'
+                  END,
+                                    modified_at = NOW()
+                FROM (
+                    SELECT item_id,
+                           ROUND(SUM(CASE WHEN is_correct THEN 1 ELSE 0 END)::numeric
+                                 / NULLIF(COUNT(*), 0) * 100, 2) AS correct_rate
+                    FROM question_review_events
+                    GROUP BY item_id
+                    HAVING COUNT(*) >= :minAttempts
+                ) r
+                WHERE q.id = r.item_id
+                  AND (q.difficulty IS NULL
+                       OR q.difficulty != CASE
+                           WHEN r.correct_rate >= 80 THEN 'EASY'
+                           WHEN r.correct_rate >= 50 THEN 'MEDIUM'
+                           WHEN r.correct_rate >= 20 THEN 'HARD'
+                           ELSE 'VERY_HARD'
+                       END)
+                """;
 
         Query query = entityManager.createNativeQuery(sql);
         query.setParameter("minAttempts", MIN_ATTEMPTS);
@@ -76,25 +78,25 @@ public class DifficultyRecalculationService {
     @Transactional
     public void recalculateSingle(Long questionId) {
         String sql = """
-            UPDATE questions q
-            SET difficulty = CASE
-                WHEN r.correct_rate >= 80 THEN 'EASY'
-                WHEN r.correct_rate >= 50 THEN 'MEDIUM'
-                WHEN r.correct_rate >= 20 THEN 'HARD'
-                ELSE 'VERY_HARD'
-              END,
-                updated_at = NOW()
-            FROM (
-                SELECT item_id,
-                       ROUND(SUM(CASE WHEN is_correct THEN 1 ELSE 0 END)::numeric
-                             / NULLIF(COUNT(*), 0) * 100, 2) AS correct_rate
-                FROM question_review_events
-                WHERE item_id = :questionId
-                GROUP BY item_id
-                HAVING COUNT(*) >= :minAttempts
-            ) r
-            WHERE q.id = r.item_id
-            """;
+                UPDATE questions q
+                SET difficulty = CASE
+                    WHEN r.correct_rate >= 80 THEN 'EASY'
+                    WHEN r.correct_rate >= 50 THEN 'MEDIUM'
+                    WHEN r.correct_rate >= 20 THEN 'HARD'
+                    ELSE 'VERY_HARD'
+                  END,
+                                    modified_at = NOW()
+                FROM (
+                    SELECT item_id,
+                           ROUND(SUM(CASE WHEN is_correct THEN 1 ELSE 0 END)::numeric
+                                 / NULLIF(COUNT(*), 0) * 100, 2) AS correct_rate
+                    FROM question_review_events
+                    WHERE item_id = :questionId
+                    GROUP BY item_id
+                    HAVING COUNT(*) >= :minAttempts
+                ) r
+                WHERE q.id = r.item_id
+                """;
 
         Query query = entityManager.createNativeQuery(sql);
         query.setParameter("questionId", questionId);

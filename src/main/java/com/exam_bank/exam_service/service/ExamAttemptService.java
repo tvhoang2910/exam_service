@@ -213,7 +213,6 @@ public class ExamAttemptService {
     public AttemptResultResponse submitAttempt(Long attemptId, Long userId) {
         ExamAttempt attempt = getAttemptOwnedByUser(attemptId, userId);
         if (attempt.getStatus() != ExamAttemptStatus.IN_PROGRESS) {
-            examSseService.onAttemptEnded(attempt.getId());
             return buildAttemptResult(attempt, null, null);
         }
 

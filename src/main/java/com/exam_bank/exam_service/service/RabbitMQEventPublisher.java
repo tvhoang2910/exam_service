@@ -1,9 +1,9 @@
 package com.exam_bank.exam_service.service;
 
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import com.exam_bank.exam_service.config.RabbitConfig;
 import com.exam_bank.exam_service.dto.ExamSubmittedEvent;
 
 import lombok.RequiredArgsConstructor;
@@ -16,8 +16,14 @@ public class RabbitMQEventPublisher {
 
     private final RabbitTemplate rabbitTemplate;
 
+    @Value("${exam.events.exchange:exam.events}")
+    private String examEventsExchange;
+
+    @Value("${exam.events.routing-key:exam.submitted}")
+    private String examEventsRoutingKey;
+
     public void publishExamSubmitted(ExamSubmittedEvent event) {
-        rabbitTemplate.convertAndSend(RabbitConfig.EXCHANGE, RabbitConfig.ROUTING_KEY, event);
+        rabbitTemplate.convertAndSend(examEventsExchange, examEventsRoutingKey, event);
         log.info("Published ExamSubmittedEvent: attemptId={}, userId={}", event.getAttemptId(), event.getUserId());
     }
 }

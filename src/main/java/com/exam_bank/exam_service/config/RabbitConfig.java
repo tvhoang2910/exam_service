@@ -15,31 +15,37 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class RabbitConfig {
 
-    public static final String EXCHANGE = "exam.events";
-    public static final String ROUTING_KEY = "exam.submitted";
-    public static final String QUEUE = "exam.events.queue";
+    public static final String DEFAULT_EXAM_EVENTS_EXCHANGE = "exam.events";
+    public static final String DEFAULT_EXAM_EVENTS_ROUTING_KEY = "exam.submitted";
+    public static final String DEFAULT_EXAM_EVENTS_QUEUE = "exam.events.queue";
+    public static final String EXCHANGE = DEFAULT_EXAM_EVENTS_EXCHANGE;
+    public static final String ROUTING_KEY = DEFAULT_EXAM_EVENTS_ROUTING_KEY;
+    public static final String QUEUE = DEFAULT_EXAM_EVENTS_QUEUE;
 
     public static final String AUTH_EVENTS_EXCHANGE = "auth.events";
     public static final String AUTH_PROFILE_SYNC_ROUTING_KEY = "auth.user.profile.sync";
     public static final String AUTH_PROFILE_SYNC_QUEUE = "exam.auth.user-profile-sync.queue";
 
     @Bean
-    public Queue examEventsQueue() {
-        return new Queue(QUEUE, true);
+    public Queue examEventsQueue(
+            @Value("${exam.events.queue:" + DEFAULT_EXAM_EVENTS_QUEUE + "}") String queueName) {
+        return new Queue(queueName, true);
     }
 
     @Bean
     public Binding examEventsBinding(
             @Qualifier("examEventsQueue") Queue examEventsQueue,
-            @Qualifier("examEventsExchange") TopicExchange examEventsExchange) {
+            @Qualifier("examEventsExchange") TopicExchange examEventsExchange,
+            @Value("${exam.events.routing-key:" + DEFAULT_EXAM_EVENTS_ROUTING_KEY + "}") String routingKey) {
         return BindingBuilder.bind(examEventsQueue)
                 .to(examEventsExchange)
-                .with(ROUTING_KEY);
+                .with(routingKey);
     }
 
     @Bean
-    public TopicExchange examEventsExchange() {
-        return new TopicExchange(EXCHANGE, true, false);
+    public TopicExchange examEventsExchange(
+            @Value("${exam.events.exchange:" + DEFAULT_EXAM_EVENTS_EXCHANGE + "}") String exchangeName) {
+        return new TopicExchange(exchangeName, true, false);
     }
 
     @Bean

@@ -7,8 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,9 +31,9 @@ public class ExamSseController {
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter examEventsSse(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @RequestParam(value = "token", required = false) String tokenParam) {
+            @CookieValue(value = "access_token", required = false) String accessTokenCookie) {
 
-        String token = extractToken(authHeader, tokenParam);
+        String token = extractToken(authHeader, accessTokenCookie);
         if (token == null) {
             log.warn("SSE exam events: no Bearer token");
             return new SseEmitter(0L);
@@ -85,12 +85,12 @@ public class ExamSseController {
         return emitter;
     }
 
-    private String extractToken(String authHeader, String tokenParam) {
+    private String extractToken(String authHeader, String accessTokenCookie) {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             return authHeader.substring(7);
         }
-        if (tokenParam != null && !tokenParam.isBlank()) {
-            return tokenParam;
+        if (accessTokenCookie != null && !accessTokenCookie.isBlank()) {
+            return accessTokenCookie;
         }
         return null;
     }
