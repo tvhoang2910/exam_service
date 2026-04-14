@@ -37,116 +37,120 @@ import static org.mockito.Mockito.when;
 @DisplayName("QuestionReportService resolve flow")
 class QuestionReportServiceTest {
 
-    @Mock
-    private QuestionReportRepository reportRepository;
+        @Mock
+        private QuestionReportRepository reportRepository;
 
-    @Mock
-    private QuestionReportHistoryRepository historyRepository;
+        @Mock
+        private QuestionReportHistoryRepository historyRepository;
 
-    @Mock
-    private QuestionRepository questionRepository;
+        @Mock
+        private QuestionRepository questionRepository;
 
-    @Mock
-    private ExamAttemptRepository attemptRepository;
+        @Mock
+        private ExamAttemptRepository attemptRepository;
 
-    @Mock
-    private ExamAuditService examAuditService;
+        @Mock
+        private ExamAuditService examAuditService;
 
-    @Mock
-    private AdminAlertPublisher adminAlertPublisher;
+        @Mock
+        private AdminAlertPublisher adminAlertPublisher;
 
-    @InjectMocks
-    private QuestionReportService questionReportService;
+        @InjectMocks
+        private QuestionReportService questionReportService;
 
-    @Captor
-    private ArgumentCaptor<List<Long>> reporterIdsCaptor;
+        @Captor
+        private ArgumentCaptor<List<Long>> reporterIdsCaptor;
 
-    @Test
-    @DisplayName("resolveQuestionReports sends notification to distinct reporters when status is RESOLVED")
-    void resolveQuestionReportsSendsNotificationToDistinctReportersWhenResolved() {
-        Long questionId = 91L;
-        Long resolvedBy = 77L;
+        @Test
+        @DisplayName("resolveQuestionReports sends notification to distinct reporters when status is RESOLVED")
+        void resolveQuestionReportsSendsNotificationToDistinctReportersWhenResolved() {
+                Long questionId = 91L;
+                Long resolvedBy = 77L;
 
-        List<QuestionReport> openReports = new ArrayList<>(List.of(
-                buildReport(questionId, 81L, "Mock Exam", 1001L),
-                buildReport(questionId, 81L, "Mock Exam", 1002L),
-                buildReport(questionId, 81L, "Mock Exam", 1001L)));
+                List<QuestionReport> openReports = new ArrayList<>(List.of(
+                                buildReport(questionId, 81L, "Mock Exam", 1001L),
+                                buildReport(questionId, 81L, "Mock Exam", 1002L),
+                                buildReport(questionId, 81L, "Mock Exam", 1001L)));
 
-        when(questionRepository.existsByIdAndExamCreatedBy(questionId, String.valueOf(resolvedBy))).thenReturn(true);
-        when(reportRepository.findDetailedByQuestionIdAndStatusInOrderByCreatedAtDesc(eq(questionId), anyList()))
-                .thenReturn(openReports);
-        when(reportRepository.saveAll(openReports)).thenReturn(openReports);
-        when(historyRepository.save(any(QuestionReportHistory.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+                when(questionRepository.existsByIdAndExamCreatedBy(questionId, String.valueOf(resolvedBy)))
+                                .thenReturn(true);
+                when(reportRepository.findDetailedByQuestionIdAndStatusInOrderByCreatedAtDesc(eq(questionId),
+                                anyList()))
+                                .thenReturn(openReports);
+                when(reportRepository.saveAll(openReports)).thenReturn(openReports);
+                when(historyRepository.save(any(QuestionReportHistory.class)))
+                                .thenAnswer(invocation -> invocation.getArgument(0));
 
-        ResolveReportRequest request = new ResolveReportRequest();
-        request.setStatus(ReportStatus.RESOLVED);
-        request.setResolutionNote("Da cap nhat dap an");
-        request.setUnhideQuestion(false);
+                ResolveReportRequest request = new ResolveReportRequest();
+                request.setStatus(ReportStatus.RESOLVED);
+                request.setResolutionNote("Da cap nhat dap an");
+                request.setUnhideQuestion(false);
 
-        questionReportService.resolveQuestionReports(questionId, resolvedBy, request);
+                questionReportService.resolveQuestionReports(questionId, resolvedBy, request);
 
-        verify(adminAlertPublisher).publishQuestionReportResolvedAlert(
-                reporterIdsCaptor.capture(),
-                eq(81L),
-                eq("Mock Exam"),
-                eq(questionId),
-                eq(3),
-                eq("Da cap nhat dap an"));
+                verify(adminAlertPublisher).publishQuestionReportResolvedAlert(
+                                reporterIdsCaptor.capture(),
+                                eq(81L),
+                                eq("Mock Exam"),
+                                eq(questionId),
+                                eq(3),
+                                eq("Da cap nhat dap an"));
 
-        assertThat(reporterIdsCaptor.getValue()).containsExactly(1001L, 1002L);
-        assertThat(openReports)
-                .allSatisfy(report -> {
-                    assertThat(report.getStatus()).isEqualTo(ReportStatus.RESOLVED);
-                    assertThat(report.getResolvedBy()).isEqualTo(resolvedBy);
-                    assertThat(report.getResolvedAt()).isNotNull();
-                    assertThat(report.getResolutionNote()).isEqualTo("Da cap nhat dap an");
-                });
-    }
+                assertThat(reporterIdsCaptor.getValue()).containsExactly(1001L, 1002L);
+                assertThat(openReports)
+                                .allSatisfy(report -> {
+                                        assertThat(report.getStatus()).isEqualTo(ReportStatus.RESOLVED);
+                                        assertThat(report.getResolvedBy()).isEqualTo(resolvedBy);
+                                        assertThat(report.getResolvedAt()).isNotNull();
+                                        assertThat(report.getResolutionNote()).isEqualTo("Da cap nhat dap an");
+                                });
+        }
 
-    @Test
-    @DisplayName("resolveQuestionReports does not notify reporters when status is REJECTED")
-    void resolveQuestionReportsDoesNotNotifyWhenRejected() {
-        Long questionId = 93L;
-        Long resolvedBy = 88L;
+        @Test
+        @DisplayName("resolveQuestionReports does not notify reporters when status is REJECTED")
+        void resolveQuestionReportsDoesNotNotifyWhenRejected() {
+                Long questionId = 93L;
+                Long resolvedBy = 88L;
 
-        List<QuestionReport> openReports = new ArrayList<>(List.of(
-                buildReport(questionId, 82L, "Mock Exam 2", 2001L),
-                buildReport(questionId, 82L, "Mock Exam 2", 2002L)));
+                List<QuestionReport> openReports = new ArrayList<>(List.of(
+                                buildReport(questionId, 82L, "Mock Exam 2", 2001L),
+                                buildReport(questionId, 82L, "Mock Exam 2", 2002L)));
 
-        when(questionRepository.existsByIdAndExamCreatedBy(questionId, String.valueOf(resolvedBy))).thenReturn(true);
-        when(reportRepository.findDetailedByQuestionIdAndStatusInOrderByCreatedAtDesc(eq(questionId), anyList()))
-                .thenReturn(openReports);
-        when(reportRepository.saveAll(openReports)).thenReturn(openReports);
-        when(historyRepository.save(any(QuestionReportHistory.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+                when(questionRepository.existsByIdAndExamCreatedBy(questionId, String.valueOf(resolvedBy)))
+                                .thenReturn(true);
+                when(reportRepository.findDetailedByQuestionIdAndStatusInOrderByCreatedAtDesc(eq(questionId),
+                                anyList()))
+                                .thenReturn(openReports);
+                when(reportRepository.saveAll(openReports)).thenReturn(openReports);
+                when(historyRepository.save(any(QuestionReportHistory.class)))
+                                .thenAnswer(invocation -> invocation.getArgument(0));
 
-        ResolveReportRequest request = new ResolveReportRequest();
-        request.setStatus(ReportStatus.REJECTED);
-        request.setResolutionNote("Khong du bang chung");
-        request.setUnhideQuestion(false);
+                ResolveReportRequest request = new ResolveReportRequest();
+                request.setStatus(ReportStatus.REJECTED);
+                request.setResolutionNote("Không đủ bằng chứng");
+                request.setUnhideQuestion(false);
 
-        questionReportService.resolveQuestionReports(questionId, resolvedBy, request);
+                questionReportService.resolveQuestionReports(questionId, resolvedBy, request);
 
-        verify(adminAlertPublisher, never()).publishQuestionReportResolvedAlert(
-                any(), any(), any(), any(), anyInt(), any());
-        assertThat(openReports)
-                .allSatisfy(report -> assertThat(report.getStatus()).isEqualTo(ReportStatus.REJECTED));
-    }
+                verify(adminAlertPublisher, never()).publishQuestionReportResolvedAlert(
+                                any(), any(), any(), any(), anyInt(), any());
+                assertThat(openReports)
+                                .allSatisfy(report -> assertThat(report.getStatus()).isEqualTo(ReportStatus.REJECTED));
+        }
 
-    private QuestionReport buildReport(Long questionId, Long examId, String examTitle, Long reporterId) {
-        OnlineExam exam = new OnlineExam();
-        exam.setId(examId);
-        exam.setTitle(examTitle);
+        private QuestionReport buildReport(Long questionId, Long examId, String examTitle, Long reporterId) {
+                OnlineExam exam = new OnlineExam();
+                exam.setId(examId);
+                exam.setTitle(examTitle);
 
-        Question question = new Question();
-        question.setId(questionId);
-        question.setExam(exam);
+                Question question = new Question();
+                question.setId(questionId);
+                question.setExam(exam);
 
-        QuestionReport report = new QuestionReport();
-        report.setQuestion(question);
-        report.setReporterId(reporterId);
-        report.setStatus(ReportStatus.REPORTED);
-        return report;
-    }
+                QuestionReport report = new QuestionReport();
+                report.setQuestion(question);
+                report.setReporterId(reporterId);
+                report.setStatus(ReportStatus.REPORTED);
+                return report;
+        }
 }

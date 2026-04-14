@@ -30,6 +30,7 @@ public class ExamManagementService {
     private final ExamAttemptRepository examAttemptRepo;
     private final QuestionRepository questionRepo;
     private final QuestionOptionRepository optionRepo;
+    private final Sm2RecordRepository sm2RecordRepo;
     private final ExamAttemptAnswerRepository examAttemptAnswerRepo;
     private final QuestionReviewEventRepository questionReviewEventRepo;
     private final QuestionReportRepository questionReportRepo;
@@ -126,6 +127,7 @@ public class ExamManagementService {
 
         if (!questionIds.isEmpty()) {
             questionReportRepo.deleteByQuestionIdIn(questionIds);
+            sm2RecordRepo.deleteByQuestionIdIn(questionIds);
             optionRepo.deleteByQuestionIdIn(questionIds);
             questionRepo.deleteByExamId(examId);
         }
@@ -281,6 +283,7 @@ public class ExamManagementService {
         }
 
         List<Long> questionIds = questions.stream().map(BaseEntity::getId).toList();
+        sm2RecordRepo.deleteByQuestionIdIn(questionIds);
         optionRepo.deleteByQuestionIdIn(questionIds);
         questionRepo.deleteByExamId(questions.getFirst().getExam().getId());
     }

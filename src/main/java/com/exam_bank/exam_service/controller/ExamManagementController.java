@@ -13,7 +13,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/exams")
-@CrossOrigin(origins = "http://localhost:5173")
 @RequiredArgsConstructor
 @Slf4j
 public class ExamManagementController {
