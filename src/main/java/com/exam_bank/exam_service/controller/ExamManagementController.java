@@ -8,6 +8,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.exam_bank.exam_service.dto.message.ExamSourceUploadedEvent;
+import com.exam_bank.exam_service.service.MinioService;
+import com.exam_bank.exam_service.service.RabbitMQEventPublisher;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -19,6 +26,8 @@ import java.util.List;
 public class ExamManagementController {
 
     private final ExamManagementService examService;
+    private final MinioService minioService;
+    private final RabbitMQEventPublisher eventPublisher;
 
     @PostMapping
     public ResponseEntity<ExamResponse> createExam(@RequestBody CreateExamRequest request) {
@@ -78,5 +87,38 @@ public class ExamManagementController {
         ExamResponse exam = examService.getPublicExamById(examId);
         log.info("getPublicExam: examId={}, title={}", examId, exam.getTitle());
         return ResponseEntity.ok(exam);
+    }
+
+    @PostMapping(value = "/upload-source", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ExamResponse> uploadExamSource(
+            @RequestParam("title") String title,
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal Jwt jwt) { // Lấy JWT của user đang thực hiện request
+
+        // 1. Lấy định danh người dùng
+        String uploaderId = jwt.getClaimAsString("userId");
+
+        // 2. Upload vật lý lên MinIO
+        String objectName = minioService.uploadFile(file);
+
+        // 3. Tạo Draft Exam trong Database
+        CreateExamRequest draftRequest = new CreateExamRequest();
+        draftRequest.setTitle(title);
+        // Lưu ý: Trong phương thức createManualExam (hoặc phương thức mới bạn tự viết),
+        // hãy đảm bảo gán exam.setCreatedBy(uploaderId), exam.setStatus(OnlineExamStatus.DRAFT),
+        // và exam.setSource(OnlineExamSource.AI_EXTRACTED) trước khi lưu xuống DB.
+        ExamResponse draftExam = examService.createManualExam(draftRequest);
+
+        // 4. Đóng gói Event và Gửi vào Queue
+        ExamSourceUploadedEvent event = ExamSourceUploadedEvent.builder()
+                .examId(draftExam.getId())
+                .fileObjectName(objectName)
+                .originalFileName(file.getOriginalFilename())
+                .uploadedByUserId(uploaderId) // Chuyển giao quyền sở hữu cho search_service xử lý
+                .build();
+
+        eventPublisher.publishFileUploadedEvent(event);
+
+        return ResponseEntity.ok(draftExam);
     }
 }
