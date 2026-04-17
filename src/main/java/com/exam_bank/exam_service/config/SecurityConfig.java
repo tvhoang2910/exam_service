@@ -2,7 +2,6 @@ package com.exam_bank.exam_service.config;
 
 import com.exam_bank.exam_service.config.properties.AuthJwtProperties;
 import com.exam_bank.exam_service.config.properties.CorsProperties;
-import com.exam_bank.exam_service.config.properties.MinioProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -34,7 +33,7 @@ import java.util.Collection;
 import java.util.List;
 
 @Configuration
-@EnableConfigurationProperties({AuthJwtProperties.class, MinioProperties.class})
+@EnableConfigurationProperties(AuthJwtProperties.class)
 public class SecurityConfig {
 
     private final AuthJwtProperties authJwtProperties;
