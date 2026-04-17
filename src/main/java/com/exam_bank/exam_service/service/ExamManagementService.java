@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.*;
@@ -51,6 +52,31 @@ public class ExamManagementService {
         OnlineExam savedExam = examRepo.save(exam);
         upsertQuestions(savedExam, request.getQuestions());
         examFlowCacheService.evictExam(savedExam.getId());
+        return mapExamToResponse(savedExam, false, true, true, null, false);
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
+            "managedExamDetail" }, allEntries = true)
+    public ExamResponse createUploadedDraftExam(String title, String objectName, String contentType) {
+        if (!StringUtils.hasText(title)) {
+            throw new ResponseStatusException(BAD_REQUEST, "Exam title must not be empty");
+        }
+        if (!StringUtils.hasText(objectName)) {
+            throw new ResponseStatusException(BAD_REQUEST, "Uploaded file reference must not be empty");
+        }
+
+        OnlineExam exam = new OnlineExam();
+        exam.setTitle(title.trim());
+        exam.setSource(OnlineExamSource.AI_EXTRACTED);
+        exam.setStatus(OnlineExamStatus.DRAFT);
+        exam.setOriginalFileUrl(objectName);
+        exam.setOriginalFileType(contentType);
+        exam.setTotalQuestions(0);
+
+        OnlineExam savedExam = examRepo.save(exam);
+        examFlowCacheService.evictExam(savedExam.getId());
+
         return mapExamToResponse(savedExam, false, true, true, null, false);
     }
 
