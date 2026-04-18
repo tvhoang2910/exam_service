@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -21,6 +22,11 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/sse")
 @RequiredArgsConstructor
 @Slf4j
+@CrossOrigin(
+        origins = {"http://localhost:5173", "http://localhost:3000"},
+        allowedHeaders = "*",  // <-- CHO PHÉP MỌI LOẠI HEADER (Bao gồm Cache-Control, Accept...)
+        exposedHeaders = "*"
+)
 public class ExamSseController {
 
     private static final long SSE_TIMEOUT_MS = TimeUnit.HOURS.toMillis(8);

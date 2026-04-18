@@ -3,11 +3,17 @@ package com.exam_bank.exam_service.service;
 import com.exam_bank.exam_service.dto.CreateExamRequest;
 import com.exam_bank.exam_service.dto.ExamResponse;
 import com.exam_bank.exam_service.dto.TagDto;
+import com.exam_bank.exam_service.dto.internal.AiQuestionDto;
+import com.exam_bank.exam_service.dto.internal.AiOptionDto;
+import com.exam_bank.exam_service.dto.message.ExamSyncEvent;
 import com.exam_bank.exam_service.entity.*;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportHistoryRepository;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportRepository;
 import com.exam_bank.exam_service.repository.*;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +26,7 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ExamManagementService {
 
     private static final int DEFAULT_TEASER_QUESTION_COUNT = 2;
@@ -39,10 +46,11 @@ public class ExamManagementService {
     private final ExamFlowCacheService examFlowCacheService;
     private final ExamAuditService examAuditService;
     private final AuthenticatedUserService authenticatedUserService;
+    private final RabbitMQEventPublisher rabbitMQEventPublisher;
 
     @Transactional
-    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
-            "managedExamDetail" }, allEntries = true)
+    @CacheEvict(cacheNames = {"publicExams", "publicExamDetail", "managedExams",
+            "managedExamDetail"}, allEntries = true)
     public ExamResponse createManualExam(CreateExamRequest request) {
         OnlineExam exam = buildExamEntity(new OnlineExam(), request);
         exam.setSource(OnlineExamSource.MANUAL_CREATED);
@@ -50,6 +58,7 @@ public class ExamManagementService {
         OnlineExam savedExam = examRepo.save(exam);
         upsertQuestions(savedExam, request.getQuestions());
         examFlowCacheService.evictExam(savedExam.getId());
+        publishSyncEvent(savedExam, "UPSERT");
         return mapExamToResponse(savedExam, false, true, true, null, false);
     }
 
@@ -67,8 +76,8 @@ public class ExamManagementService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
-            "managedExamDetail" }, allEntries = true)
+    @CacheEvict(cacheNames = {"publicExams", "publicExamDetail", "managedExams",
+            "managedExamDetail"}, allEntries = true)
     public ExamResponse updateExam(Long examId, CreateExamRequest request) {
         OnlineExam existing = findExamOrThrow(examId);
 
@@ -92,13 +101,13 @@ public class ExamManagementService {
         }
 
         examFlowCacheService.evictExam(updatedExam.getId());
-
+        publishSyncEvent(updatedExam, "UPSERT");
         return mapExamToResponse(updatedExam, false, true, true, null, false);
     }
 
     @Transactional
-    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
-            "managedExamDetail" }, allEntries = true)
+    @CacheEvict(cacheNames = {"publicExams", "publicExamDetail", "managedExams",
+            "managedExamDetail"}, allEntries = true)
     public void deleteExam(Long examId) {
         OnlineExam existing = findExamOrThrow(examId);
         List<Question> existingQuestions = questionRepo.findByExamIdOrderByIdAsc(examId);
@@ -134,7 +143,7 @@ public class ExamManagementService {
         Long examIdForAudit = existing.getId();
         examRepo.delete(existing);
         examFlowCacheService.evictExam(examId);
-
+        publishSyncEvent(existing, "DELETE");
         examAuditService.log(
                 ExamAuditService.ACTION_EXAM_DELETED,
                 authenticatedUserService.getCurrentUserId(),
@@ -146,8 +155,8 @@ public class ExamManagementService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = { "publicExams", "publicExamDetail", "managedExams",
-            "managedExamDetail" }, allEntries = true)
+    @CacheEvict(cacheNames = {"publicExams", "publicExamDetail", "managedExams",
+            "managedExamDetail"}, allEntries = true)
     public ExamResponse updateExamStatus(Long examId, OnlineExamStatus status) {
         OnlineExam existing = findExamOrThrow(examId);
         OnlineExamStatus previousStatus = existing.getStatus();
@@ -163,7 +172,7 @@ public class ExamManagementService {
                 examId,
                 existing.getTitle(),
                 "Trạng thái thay đổi: " + previousStatus + " → " + status);
-
+        publishSyncEvent(saved, "UPSERT");
         return mapExamToResponse(saved, false, true, false, null, false);
     }
 
@@ -286,7 +295,7 @@ public class ExamManagementService {
     }
 
     private boolean isQuestionTreeChanged(List<Question> existingQuestions,
-            List<CreateExamRequest.QuestionDto> requestedQuestions) {
+                                          List<CreateExamRequest.QuestionDto> requestedQuestions) {
         List<CreateExamRequest.QuestionDto> requested = requestedQuestions == null ? List.of() : requestedQuestions;
         if (existingQuestions.size() != requested.size()) {
             return true;
@@ -368,11 +377,11 @@ public class ExamManagementService {
     }
 
     private ExamResponse mapExamToResponse(OnlineExam exam,
-            boolean includeQuestions,
-            boolean includeAnswerKey,
-            boolean includeTags,
-            Integer questionLimit,
-            boolean premiumLocked) {
+                                           boolean includeQuestions,
+                                           boolean includeAnswerKey,
+                                           boolean includeTags,
+                                           Integer questionLimit,
+                                           boolean premiumLocked) {
         ExamResponse response = new ExamResponse();
         response.setId(exam.getId());
         response.setTitle(exam.getTitle());
@@ -453,5 +462,79 @@ public class ExamManagementService {
         }
 
         return Math.max(MIN_TEASER_QUESTION_COUNT, Math.min(MAX_TEASER_QUESTION_COUNT, requestedValue));
+    }
+
+    @Transactional
+    public void processAiExtractionResult(Long examId, String jsonResult) {
+        // 1. Tìm đề thi gốc
+        OnlineExam exam = examRepo.findById(examId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đề thi với ID: " + examId));
+
+        try {
+            // 2. Dịch chuỗi JSON thành List<AiQuestionDto>
+            ObjectMapper mapper = new ObjectMapper();
+            List<AiQuestionDto> parsedQuestions = mapper.readValue(jsonResult, new TypeReference<List<AiQuestionDto>>() {
+            });
+
+            List<Question> questionsToSave = new ArrayList<>();
+            List<QuestionOption> optionsToSave = new ArrayList<>();
+
+            // 3. Chuyển đổi DTO thành Entity
+            for (AiQuestionDto dto : parsedQuestions) {
+                Question question = new Question();
+                question.setExam(exam);
+                question.setContent(dto.getContent());
+                question.setExplanation(dto.getExplanation());
+                question.setScoreWeight(dto.getScoreWeight() != null ? dto.getScoreWeight() : 1.0);
+                question.setDifficulty(Question.Difficulty.MEDIUM); // Mặc định là Trung bình
+                question.setIsHidden(false);
+                questionsToSave.add(question);
+
+                if (dto.getOptions() != null) {
+                    for (AiOptionDto optDto : dto.getOptions()) {
+                        QuestionOption option = new QuestionOption();
+                        option.setQuestion(question); // Nối khóa ngoại question_id
+                        option.setContent(optDto.getContent());
+                        option.setIsCorrect(optDto.isCorrect());
+                        optionsToSave.add(option);
+                    }
+                }
+            }
+
+            // 4. Lưu đồng loạt vào Database cực nhanh (Batch Insert)
+            questionRepo.saveAll(questionsToSave);
+            optionRepo.saveAll(optionsToSave);
+
+            // 5. Cập nhật lại tổng số câu hỏi cho Đề thi (Vẫn giữ status là DRAFT để Admin duyệt lại)
+            exam.setTotalQuestions(questionsToSave.size());
+            examRepo.save(exam);
+            publishSyncEvent(exam, "UPSERT");
+            log.info("Đã lưu thành công {} câu hỏi vào DB cho Đề thi ID: {}", questionsToSave.size(), examId);
+
+        } catch (Exception e) {
+            log.error("Lỗi khi parse và lưu JSON từ AI cho Exam ID {}: {}", examId, e.getMessage());
+            throw new RuntimeException("Không thể lưu dữ liệu AI vào Database", e);
+        }
+    }
+
+    private void publishSyncEvent(OnlineExam exam, String action) {
+        try {
+            List<String> tagNames = exam.getTags() != null
+                    ? exam.getTags().stream().map(Tag::getName).toList()
+                    : new ArrayList<>();
+
+            ExamSyncEvent syncEvent = ExamSyncEvent.builder()
+                    .id(exam.getId())
+                    .title(exam.getTitle())
+                    .status(exam.getStatus().name())
+                    .isPremium(exam.getIsPremium())
+                    .tags(tagNames)
+                    .action(action) // "UPSERT" hoặc "DELETE"
+                    .build();
+
+            rabbitMQEventPublisher.publishExamSyncEvent(syncEvent);
+        } catch (Exception e) {
+            log.error("Lỗi khi bắn sự kiện đồng bộ Elasticsearch cho Exam ID: {}", exam.getId(), e);
+        }
     }
 }

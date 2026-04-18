@@ -141,4 +141,9 @@ public class ExamSseService implements MessageListener {
         submissionsToday.set(0);
         log.info("Reset daily submission counter at midnight");
     }
+    public void onAiExtractionCompleted(Long examId, Long userId, boolean isSuccess, String message) {
+        ExamSseEvent event = ExamSseEvent.aiExtractionResult(examId, userId, isSuccess, message);
+        publishEvent(event);
+        log.info("Đã phát sóng sự kiện SSE AI_EXTRACTION cho Exam ID: {}, Success: {}", examId, isSuccess);
+    }
 }

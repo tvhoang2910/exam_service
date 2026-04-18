@@ -19,7 +19,7 @@ public class CorsProperties {
 
     private List<String> allowedMethods = List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
 
-    private List<String> allowedHeaders = List.of("Authorization", "Content-Type", "Accept");
+    private List<String> allowedHeaders = List.of("Authorization", "Content-Type", "Accept", "Cache-Control");
 
     private boolean allowCredentials = true;
 }

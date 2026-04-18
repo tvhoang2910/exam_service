@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.amqp.support.converter.DefaultClassMapper;
 
 @Configuration
 public class RabbitConfig {
@@ -72,7 +73,27 @@ public class RabbitConfig {
     }
 
     @Bean
+    public Queue aiExtractedQueue(
+            @Value("${search.events.ai-extracted-queue:search.ai.extracted.queue}") String queueName) {
+        return new Queue(queueName, true); // true = bền vững (durable)
+    }
+
+    @Bean
+    public Binding aiExtractedBinding(
+            @Qualifier("aiExtractedQueue") Queue aiExtractedQueue,
+            @Qualifier("examEventsExchange") TopicExchange examEventsExchange, // Nối vào exchange chung của exam
+            @Value("${search.events.ai-extracted-routing-key:search.ai.extracted}") String routingKey) {
+        return BindingBuilder.bind(aiExtractedQueue)
+                .to(examEventsExchange)
+                .with(routingKey);
+    }
+
+    @Bean
     public JacksonJsonMessageConverter jacksonJsonMessageConverter() {
+        JacksonJsonMessageConverter converter = new JacksonJsonMessageConverter();
+        DefaultClassMapper classMapper = new DefaultClassMapper();
+        classMapper.setTrustedPackages("*"); // Tin tưởng mọi nguồn gửi đến
+        converter.setClassMapper(classMapper);
         return new JacksonJsonMessageConverter();
     }
 
