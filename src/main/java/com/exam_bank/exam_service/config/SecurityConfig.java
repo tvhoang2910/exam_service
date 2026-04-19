@@ -62,6 +62,8 @@ public class SecurityConfig {
  .requestMatchers("/tags").hasAnyRole("ADMIN", "CONTRIBUTOR")
  .requestMatchers("/exams/manage", "/exams/manage/**").hasAnyRole("ADMIN", "CONTRIBUTOR")
  .requestMatchers("/exams/**").hasAnyRole("ADMIN", "CONTRIBUTOR")
+ .requestMatchers("/admin/uploads", "/admin/uploads/**").hasAnyRole("ADMIN", "CONTRIBUTOR")
+ .requestMatchers("/uploads", "/uploads/**").hasAnyRole("USER", "ADMIN", "CONTRIBUTOR")
  .requestMatchers("/admin/reports", "/admin/reports/**").hasAnyRole("ADMIN", "CONTRIBUTOR")
  .requestMatchers("/admin/**").hasRole("ADMIN")
  .requestMatchers("/me").hasAnyRole("ADMIN", "USER")

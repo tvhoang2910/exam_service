@@ -26,6 +26,26 @@ public class RabbitConfig {
     public static final String AUTH_PROFILE_SYNC_ROUTING_KEY = "auth.user.profile.sync";
     public static final String AUTH_PROFILE_SYNC_QUEUE = "exam.auth.user-profile-sync.queue";
 
+    public static final String DEFAULT_AI_EXTRACTED_ROUTING_KEY = "search.ai.extracted";
+    public static final String DEFAULT_EXTRACTION_RESULT_QUEUE = "exam.extraction.result.queue";
+
+    @Bean
+    public Queue extractionResultQueue(
+            @Value("${exam.extraction.result.queue:" + DEFAULT_EXTRACTION_RESULT_QUEUE + "}") String queueName) {
+        return new Queue(queueName, true);
+    }
+
+    @Bean
+    public Binding extractionResultBinding(
+            @Qualifier("extractionResultQueue") Queue extractionResultQueue,
+            @Qualifier("examEventsExchange") TopicExchange examEventsExchange,
+            @Value("${exam.events.ai-extracted-routing-key:" + DEFAULT_AI_EXTRACTED_ROUTING_KEY
+                    + "}") String routingKey) {
+        return BindingBuilder.bind(extractionResultQueue)
+                .to(examEventsExchange)
+                .with(routingKey);
+    }
+
     @Bean
     public Queue examEventsQueue(
             @Value("${exam.events.queue:" + DEFAULT_EXAM_EVENTS_QUEUE + "}") String queueName) {

@@ -8,6 +8,7 @@ import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportHis
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportRepository;
 import com.exam_bank.exam_service.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ExamManagementService {
 
     private static final int DEFAULT_TEASER_QUESTION_COUNT = 2;
@@ -178,6 +180,15 @@ public class ExamManagementService {
             "managedExamDetail" }, allEntries = true)
     public ExamResponse updateExamStatus(Long examId, OnlineExamStatus status) {
         OnlineExam existing = findExamOrThrow(examId);
+
+        if (status == OnlineExamStatus.PUBLISHED) {
+            Integer total = existing.getTotalQuestions();
+            if (total == null || total <= 0) {
+                log.warn("Reject publish exam {}: totalQuestions={}", examId, total);
+                throw new ResponseStatusException(BAD_REQUEST, "Cannot publish exam with zero questions");
+            }
+        }
+
         OnlineExamStatus previousStatus = existing.getStatus();
         existing.setStatus(status);
         OnlineExam saved = examRepo.save(existing);

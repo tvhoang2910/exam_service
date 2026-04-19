@@ -59,6 +59,51 @@
             "name": "exam.events.queue",
             "type": "java.lang.String",
             "description": "Queue name used for exam events in exam_service topology declarations."
+        },
+        {
+            "name": "exam.events.file-uploaded-routing-key",
+            "type": "java.lang.String",
+            "description": "A description for 'exam.events.file-uploaded-routing-key'"
+        },
+        {
+            "name": "minio.bucket-name",
+            "type": "java.lang.String",
+            "description": "A description for 'minio.bucket-name'"
+        },
+        {
+            "name": "minio.secret-key",
+            "type": "java.lang.String",
+            "description": "A description for 'minio.secret-key'"
+        },
+        {
+            "name": "minio.access-key",
+            "type": "java.lang.String",
+            "description": "A description for 'minio.access-key'"
+        },
+        {
+            "name": "minio.url",
+            "type": "java.lang.String",
+            "description": "A description for 'minio.url'"
+        },
+        {
+            "name": "exam.upload.presign-put-ttl-seconds",
+            "type": "java.lang.Integer",
+            "description": "TTL (seconds) for presigned PUT URLs in exam upload flow."
+        },
+        {
+            "name": "exam.upload.presign-get-ttl-seconds",
+            "type": "java.lang.Integer",
+            "description": "TTL (seconds) for presigned GET URLs in exam upload flow."
+        },
+        {
+            "name": "exam.upload.max-pages",
+            "type": "java.lang.Integer",
+            "description": "Maximum number of pages accepted per upload request."
+        },
+        {
+            "name": "exam.upload.allowed-content-types",
+            "type": "java.lang.String",
+            "description": "Comma-separated list of content types allowed by exam upload flow."
         }
     ]
 }

@@ -13,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,6 +27,7 @@ import tools.jackson.databind.ObjectMapper;
 public class ExamSseService implements MessageListener {
 
     private static final String EXAM_EVENTS_CHANNEL = "exam:events";
+    private static final String ROLE_USER = "USER";
 
     private final StringRedisTemplate redisTemplate;
     private final RedisMessageListenerContainer redisContainer;
@@ -34,8 +36,10 @@ public class ExamSseService implements MessageListener {
     private final AtomicInteger activeAttempts = new AtomicInteger(0);
     private final AtomicInteger submissionsToday = new AtomicInteger(0);
 
-    // role -> list of SseEmitters
+    // role -> list of SseEmitters (ADMIN, CONTRIBUTOR)
     private final Map<String, List<SseEmitter>> roleEmitters = new ConcurrentHashMap<>();
+    // uploaderId -> list of SseEmitters (USER)
+    private final Map<Long, List<SseEmitter>> userEmitters = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void init() {
@@ -71,11 +75,16 @@ public class ExamSseService implements MessageListener {
                 continue;
             }
 
-            var dead = new java.util.ArrayList<SseEmitter>();
+            var dead = new ArrayList<SseEmitter>();
             for (SseEmitter emitter : emitters) {
                 try {
                     emitter.send(SseEmitter.event().name("exam").data(data));
                 } catch (Exception e) {
+                    try {
+                        emitter.complete();
+                    } catch (Exception ignored) {
+                        // no-op
+                    }
                     dead.add(emitter);
                 }
             }
@@ -84,15 +93,85 @@ public class ExamSseService implements MessageListener {
     }
 
     public void registerEmitter(String role, SseEmitter emitter) {
+        registerEmitter(role, null, emitter);
+    }
+
+    public void registerEmitter(String role, Long userId, SseEmitter emitter) {
+        if (ROLE_USER.equals(role)) {
+            if (userId == null) {
+                log.warn("registerEmitter called with USER role but null userId, dropping");
+                return;
+            }
+            userEmitters
+                    .computeIfAbsent(userId, key -> new CopyOnWriteArrayList<>())
+                    .add(emitter);
+            log.info("Registered USER SSE emitter for userId={}", userId);
+            return;
+        }
         List<SseEmitter> list = roleEmitters.get(role);
-        if (list != null)
+        if (list != null) {
             list.add(emitter);
+        }
     }
 
     public void removeEmitter(String role, SseEmitter emitter) {
+        removeEmitter(role, null, emitter);
+    }
+
+    public void removeEmitter(String role, Long userId, SseEmitter emitter) {
+        if (ROLE_USER.equals(role)) {
+            if (userId == null) {
+                return;
+            }
+            List<SseEmitter> list = userEmitters.get(userId);
+            if (list != null) {
+                list.remove(emitter);
+                if (list.isEmpty()) {
+                    userEmitters.remove(userId, list);
+                }
+            }
+            return;
+        }
         List<SseEmitter> list = roleEmitters.get(role);
-        if (list != null)
+        if (list != null) {
             list.remove(emitter);
+        }
+    }
+
+    public void sendToUser(Long userId, String eventName, Object payload) {
+        if (userId == null) {
+            return;
+        }
+        List<SseEmitter> emitters = userEmitters.get(userId);
+        if (emitters == null || emitters.isEmpty()) {
+            log.info("sendToUser: no active emitters for userId={}", userId);
+            return;
+        }
+
+        String data;
+        try {
+            data = objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            log.error("Failed to serialize SSE payload for userId={}: {}", userId, e.getMessage());
+            return;
+        }
+
+        var dead = new ArrayList<SseEmitter>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event().name(eventName).data(data));
+            } catch (Exception e) {
+                try {
+                    emitter.complete();
+                } catch (Exception ignored) {
+                    // no-op
+                }
+                dead.add(emitter);
+            }
+        }
+        emitters.removeAll(dead);
+        log.info("Sent SSE event={} to userId={} (activeEmitters={})", eventName, userId,
+                emitters.size());
     }
 
     private void publishEvent(ExamSseEvent event) {

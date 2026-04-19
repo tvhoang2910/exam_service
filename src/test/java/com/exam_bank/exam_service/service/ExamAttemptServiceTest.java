@@ -2,6 +2,11 @@ package com.exam_bank.exam_service.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +23,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.exam_bank.exam_service.dto.ExamResponse;
 import com.exam_bank.exam_service.dto.StartAttemptRequest;
+import com.exam_bank.exam_service.dto.StartAttemptResponse;
+import com.exam_bank.exam_service.entity.ExamAttempt;
+import com.exam_bank.exam_service.entity.ExamAttemptStatus;
 import com.exam_bank.exam_service.entity.OnlineExam;
 import com.exam_bank.exam_service.entity.OnlineExamStatus;
 import com.exam_bank.exam_service.repository.ExamAttemptAnswerRepository;
@@ -134,6 +142,84 @@ class ExamAttemptServiceTest {
                 });
     }
 
+    @Test
+    @DisplayName("startAttempt fails fast when published exam has zero questions")
+    void startAttempt_whenExamHasZeroQuestions_thenBadRequestAndNoSave() {
+        OnlineExam exam = buildPublishedExam(true, 2);
+        exam.setTotalQuestions(0);
+
+        StartAttemptRequest request = new StartAttemptRequest();
+        request.setExamId(99L);
+
+        when(examRepository.findById(99L)).thenReturn(Optional.of(exam));
+
+        assertThatThrownBy(() -> examAttemptService.startAttempt(request, 10L))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException responseStatusException = (ResponseStatusException) exception;
+                    assertThat(responseStatusException.getStatusCode().value()).isEqualTo(400);
+                    assertThat(responseStatusException.getReason()).contains("Exam has no questions");
+                });
+
+        verify(examAttemptRepository, never()).save(any(ExamAttempt.class));
+        verify(authUserLookupClient, never()).findPremiumStatusByUserId(anyLong());
+    }
+
+    @Test
+    @DisplayName("startAttempt creates attempt when exam has questions and is available")
+    void startAttempt_whenExamHasQuestions_thenCreateAttemptSuccessfully() {
+        OnlineExam exam = buildPublishedExam(false, 2);
+        exam.setTotalQuestions(5);
+
+        StartAttemptRequest request = new StartAttemptRequest();
+        request.setExamId(99L);
+        request.setClientVersion("web-1.0.0");
+
+        when(examRepository.findById(99L)).thenReturn(Optional.of(exam));
+        when(examAttemptRepository
+                .findFirstByExamIdAndUserIdAndStatusOrderByCreatedAtDesc(99L, 10L, ExamAttemptStatus.IN_PROGRESS))
+                .thenReturn(Optional.empty());
+        when(examAttemptRepository.countByExamIdAndUserIdAndStatusIn(eq(99L), eq(10L), anyCollection()))
+                .thenReturn(0L);
+        when(examAttemptRepository.save(any(ExamAttempt.class))).thenAnswer(invocation -> {
+            ExamAttempt saved = invocation.getArgument(0);
+            saved.setId(500L);
+            return saved;
+        });
+
+        StartAttemptResponse response = examAttemptService.startAttempt(request, 10L);
+
+        assertThat(response.getAttemptId()).isEqualTo(500L);
+        assertThat(response.getExamId()).isEqualTo(99L);
+        assertThat(response.getDurationMinutes()).isEqualTo(60);
+        verify(examAttemptRepository).save(any(ExamAttempt.class));
+        verify(examSseService).onAttemptStarted(500L, 99L);
+    }
+
+    @Test
+    @DisplayName("startAttempt checks published status before zero-question guard")
+    void startAttempt_whenExamIsNotPublished_thenRejectBeforeZeroQuestionGuard() {
+        OnlineExam exam = buildPublishedExam(false, 2);
+        exam.setStatus(OnlineExamStatus.DRAFT);
+        exam.setTotalQuestions(0);
+
+        StartAttemptRequest request = new StartAttemptRequest();
+        request.setExamId(99L);
+
+        when(examRepository.findById(99L)).thenReturn(Optional.of(exam));
+
+        assertThatThrownBy(() -> examAttemptService.startAttempt(request, 10L))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException responseStatusException = (ResponseStatusException) exception;
+                    assertThat(responseStatusException.getStatusCode().value()).isEqualTo(400);
+                    assertThat(responseStatusException.getReason()).contains("Exam is not available for attempts");
+                });
+
+        verify(examAttemptRepository, never()).save(any(ExamAttempt.class));
+        verify(authUserLookupClient, never()).findPremiumStatusByUserId(anyLong());
+    }
+
     private OnlineExam buildPublishedExam(boolean premium, int teaserQuestionCount) {
         OnlineExam exam = new OnlineExam();
         exam.setId(99L);
@@ -145,6 +231,7 @@ class ExamAttemptServiceTest {
         exam.setDurationMinutes(60);
         exam.setMaxAttempts(5);
         exam.setPassingScore(5);
+        exam.setTotalQuestions(10);
         exam.setCreatedAt(Instant.now());
         exam.setModifiedAt(Instant.now());
         return exam;

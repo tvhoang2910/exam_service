@@ -97,6 +97,13 @@ public class ExamAttemptService {
             throw new ResponseStatusException(BAD_REQUEST, "Exam is not available for attempts");
         }
 
+        Integer totalQuestions = exam.getTotalQuestions();
+        if (totalQuestions == null || totalQuestions <= 0) {
+            log.warn("Reject startAttempt: exam {} has no questions (totalQuestions={})", exam.getId(),
+                    totalQuestions);
+            throw new ResponseStatusException(BAD_REQUEST, "Exam has no questions");
+        }
+
         if (isPremiumExamLockedForUser(exam, userId)) {
             log.warn("Start attempt rejected: premium exam {} locked for user {}", exam.getId(), userId);
             throw new ResponseStatusException(FORBIDDEN,
