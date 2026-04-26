@@ -52,10 +52,12 @@ public class ExamManagementService {
     @CacheEvict(cacheNames = {"publicExams", "publicExamDetail", "managedExams",
             "managedExamDetail"}, allEntries = true)
     public ExamResponse createManualExam(CreateExamRequest request) {
+        log.info("TRẠM 1 - Dữ liệu từ Postman gửi lên: {}", request.getNewTags());
         OnlineExam exam = buildExamEntity(new OnlineExam(), request);
         exam.setSource(OnlineExamSource.MANUAL_CREATED);
         exam.setStatus(OnlineExamStatus.DRAFT);
         OnlineExam savedExam = examRepo.save(exam);
+        log.info("TRẠM 2 - Tags đã lưu thành công vào PostgreSQL: {}", savedExam.getTags());
         upsertQuestions(savedExam, request.getQuestions());
         examFlowCacheService.evictExam(savedExam.getId());
         publishSyncEvent(savedExam, "UPSERT");
@@ -232,6 +234,7 @@ public class ExamManagementService {
     private Set<Tag> resolveExamTags(List<Long> tagIds, List<String> newTags) {
         Set<Tag> resolved = new HashSet<>();
 
+        // 1. Xử lý các Tag đã có sẵn qua ID
         if (tagIds != null && !tagIds.isEmpty()) {
             Set<Long> uniqueIds = new HashSet<>(tagIds);
             List<Tag> existingTags = tagRepo.findAllById(uniqueIds);
@@ -241,13 +244,21 @@ public class ExamManagementService {
             resolved.addAll(existingTags);
         }
 
+        // 2. Xử lý các Tag gửi dạng chữ (newTags)
         if (newTags != null && !newTags.isEmpty()) {
             for (String rawName : newTags) {
+                if (rawName == null || rawName.trim().isEmpty()) continue;
+
+                // Tận dụng hàm normalize có sẵn của bạn
                 String normalizedName = tagService.normalizeTagName(rawName);
+
+                // Tìm và lưu trực tiếp Entity thật, KHÔNG dùng getReferenceById để tránh lỗi Proxy
                 Tag tag = tagRepo.findByName(normalizedName)
                         .orElseGet(() -> {
-                            TagDto created = tagService.createTag(normalizedName);
-                            return tagRepo.getReferenceById(created.getId());
+                            Tag newTag = new Tag();
+                            newTag.setName(normalizedName);
+                            // Lưu trực tiếp xuống Database và lấy ra Object thật
+                            return tagRepo.save(newTag);
                         });
                 resolved.add(tag);
             }
@@ -522,7 +533,7 @@ public class ExamManagementService {
             List<String> tagNames = exam.getTags() != null
                     ? exam.getTags().stream().map(Tag::getName).toList()
                     : new ArrayList<>();
-
+            log.info("TRẠM 3 - Chuẩn bị bắn sang RabbitMQ. Danh sách Tags là: {}", tagNames);
             ExamSyncEvent syncEvent = ExamSyncEvent.builder()
                     .id(exam.getId())
                     .title(exam.getTitle())
