@@ -14,14 +14,14 @@ import java.util.List;
 @ConfigurationProperties(prefix = "app.cors")
 public class CorsProperties {
 
- @NotBlank
- private String allowedOrigins;
+    @NotBlank
+    private String allowedOrigins;
 
- private List<String> allowedMethods = List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
+    private List<String> allowedMethods = List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
 
- private List<String> allowedHeaders = List.of("Authorization", "Content-Type", "Accept", "Cache-Control");
+    private List<String> allowedHeaders = List.of("Authorization", "Content-Type", "Accept", "Cache-Control");
 
- private List<String> exposedHeaders = List.of("Authorization");
+    private List<String> exposedHeaders = List.of("Authorization");
 
- private boolean allowCredentials = true;
+    private boolean allowCredentials = true;
 }
