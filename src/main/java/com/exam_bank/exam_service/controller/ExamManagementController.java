@@ -6,8 +6,18 @@ import com.exam_bank.exam_service.entity.OnlineExamStatus;
 import com.exam_bank.exam_service.service.ExamManagementService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
+import com.exam_bank.exam_service.dto.message.ExamSourceUploadedEvent;
+import com.exam_bank.exam_service.service.MinioService;
+import com.exam_bank.exam_service.service.RabbitMQEventPublisher;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -18,6 +28,8 @@ import java.util.List;
 public class ExamManagementController {
 
     private final ExamManagementService examService;
+    private final MinioService minioService;
+    private final RabbitMQEventPublisher eventPublisher;
 
     @PostMapping
     public ResponseEntity<ExamResponse> createExam(@RequestBody CreateExamRequest request) {
@@ -77,5 +89,52 @@ public class ExamManagementController {
         ExamResponse exam = examService.getPublicExamById(examId);
         log.info("getPublicExam: examId={}, title={}", examId, exam.getTitle());
         return ResponseEntity.ok(exam);
+    }
+
+    @PostMapping(value = "/upload-source", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ExamResponse> uploadExamSource(
+            @RequestParam("title") String title,
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        if (!StringUtils.hasText(title)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Exam title must not be empty");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Uploaded file must not be empty");
+        }
+        if (jwt == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing authentication context");
+        }
+
+        String uploaderId = extractUploaderId(jwt);
+
+        String objectName = minioService.uploadFile(file);
+        ExamResponse draftExam = examService.createUploadedDraftExam(
+                title,
+                objectName,
+                file.getContentType());
+
+        ExamSourceUploadedEvent event = ExamSourceUploadedEvent.builder()
+                .examId(draftExam.getId())
+                .fileObjectName(objectName)
+                .originalFileName(file.getOriginalFilename())
+                .uploadedByUserId(uploaderId)
+                .build();
+
+        eventPublisher.publishFileUploadedEvent(event);
+
+        return ResponseEntity.ok(draftExam);
+    }
+
+    private String extractUploaderId(Jwt jwt) {
+        Object claim = jwt.getClaim("userId");
+        if (claim instanceof Number number && number.longValue() > 0) {
+            return Long.toString(number.longValue());
+        }
+        if (claim instanceof String value && StringUtils.hasText(value)) {
+            return value.trim();
+        }
+        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing userId claim in JWT");
     }
 }

@@ -1,6 +1,7 @@
 package com.exam_bank.exam_service.service;
 
 import com.exam_bank.exam_service.entity.OnlineExam;
+import com.exam_bank.exam_service.entity.OnlineExamStatus;
 import com.exam_bank.exam_service.entity.Question;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportHistoryRepository;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportRepository;
@@ -23,9 +24,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ExamManagementService Unit Tests")
@@ -106,5 +113,83 @@ class ExamManagementServiceTest {
         deleteOrder.verify(examRepo).delete(exam);
 
         verify(examFlowCacheService).evictExam(examId);
+    }
+
+    @Test
+    @DisplayName("updateExamStatus rejects publishing when totalQuestions is zero")
+    void updateExamStatus_whenPublishingAndTotalQuestionsZero_thenThrowBadRequest() {
+        Long examId = 10L;
+        OnlineExam exam = baseExam(examId, OnlineExamStatus.DRAFT, 0);
+        when(examRepo.findById(examId)).thenReturn(Optional.of(exam));
+
+        assertThatThrownBy(() -> service.updateExamStatus(examId, OnlineExamStatus.PUBLISHED))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        ex -> assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+
+        verify(examRepo, never()).save(org.mockito.ArgumentMatchers.any(OnlineExam.class));
+    }
+
+    @Test
+    @DisplayName("updateExamStatus rejects publishing when totalQuestions is null")
+    void updateExamStatus_whenPublishingAndTotalQuestionsNull_thenThrowBadRequest() {
+        Long examId = 11L;
+        OnlineExam exam = baseExam(examId, OnlineExamStatus.DRAFT, null);
+        when(examRepo.findById(examId)).thenReturn(Optional.of(exam));
+
+        assertThatThrownBy(() -> service.updateExamStatus(examId, OnlineExamStatus.PUBLISHED))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        ex -> assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+
+        verify(examRepo, never()).save(org.mockito.ArgumentMatchers.any(OnlineExam.class));
+    }
+
+    @Test
+    @DisplayName("updateExamStatus publishes successfully when totalQuestions is positive")
+    void updateExamStatus_whenPublishingAndTotalQuestionsPositive_thenSuccess() {
+        Long examId = 12L;
+        OnlineExam exam = baseExam(examId, OnlineExamStatus.DRAFT, 5);
+        when(examRepo.findById(examId)).thenReturn(Optional.of(exam));
+        when(examRepo.save(org.mockito.ArgumentMatchers.any(OnlineExam.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(99L);
+
+        var response = service.updateExamStatus(examId, OnlineExamStatus.PUBLISHED);
+
+        assertThat(response.getStatus()).isEqualTo(OnlineExamStatus.PUBLISHED);
+        verify(examRepo).save(org.mockito.ArgumentMatchers.any(OnlineExam.class));
+        verify(examFlowCacheService).evictExam(examId);
+        verify(examAuditService).log(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(99L),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(examId),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("updateExamStatus allows draft even when totalQuestions is zero")
+    void updateExamStatus_whenSettingDraftAndTotalQuestionsZero_thenSuccess() {
+        Long examId = 13L;
+        OnlineExam exam = baseExam(examId, OnlineExamStatus.ARCHIVED, 0);
+        when(examRepo.findById(examId)).thenReturn(Optional.of(exam));
+        when(examRepo.save(org.mockito.ArgumentMatchers.any(OnlineExam.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(100L);
+
+        var response = service.updateExamStatus(examId, OnlineExamStatus.DRAFT);
+
+        assertThat(response.getStatus()).isEqualTo(OnlineExamStatus.DRAFT);
+        verify(examRepo).save(org.mockito.ArgumentMatchers.any(OnlineExam.class));
+    }
+
+    private OnlineExam baseExam(Long id, OnlineExamStatus status, Integer totalQuestions) {
+        OnlineExam exam = new OnlineExam();
+        exam.setId(id);
+        exam.setTitle("Exam " + id);
+        exam.setStatus(status);
+        exam.setTotalQuestions(totalQuestions);
+        return exam;
     }
 }

@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -17,6 +18,19 @@ import java.util.Map;
 @RestControllerAdvice
 @Slf4j
 public class ApiExceptionHandler {
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public ResponseEntity<Void> handleAsyncRequestNotUsable(
+            AsyncRequestNotUsableException exception,
+            HttpServletRequest request) {
+        String path = request.getRequestURI();
+        if (path != null && path.startsWith("/api/v1/exam/sse/")) {
+            log.info("Client disconnected from SSE stream on {}: {}", path, exception.getMessage());
+        } else {
+            log.warn("Async request became unusable on {}: {}", path, exception.getMessage());
+        }
+        return ResponseEntity.noContent().build();
+    }
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleResponseStatusException(

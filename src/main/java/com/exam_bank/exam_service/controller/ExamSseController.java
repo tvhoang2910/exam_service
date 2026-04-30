@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -21,6 +22,11 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/sse")
 @RequiredArgsConstructor
 @Slf4j
+@CrossOrigin(
+        origins = {"http://localhost:5173", "http://localhost:3000"},
+        allowedHeaders = "*",  // <-- CHO PHÉP MỌI LOẠI HEADER (Bao gồm Cache-Control, Accept...)
+        exposedHeaders = "*"
+)
 public class ExamSseController {
 
     private static final long SSE_TIMEOUT_MS = TimeUnit.HOURS.toMillis(8);
@@ -40,38 +46,47 @@ public class ExamSseController {
         }
 
         String role;
+        Long userId;
         try {
             Jwt jwt = jwtDecoder.decode(token);
             role = jwt.getClaimAsString("role");
+            userId = extractUserId(jwt);
         } catch (Exception e) {
             log.warn("SSE exam events: failed to decode JWT: {}", e.getMessage());
             return new SseEmitter(0L);
         }
 
-        if (role == null || (!role.equals("ADMIN") && !role.equals("CONTRIBUTOR"))) {
+        if (role == null
+                || (!role.equals("ADMIN") && !role.equals("CONTRIBUTOR") && !role.equals("USER"))) {
             log.warn("SSE exam events: role={} not allowed", role);
             return new SseEmitter(0L);
         }
 
-        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
-        examSseService.registerEmitter(role, emitter);
+        if (role.equals("USER") && userId == null) {
+            log.warn("SSE exam events: USER role missing userId claim");
+            return new SseEmitter(0L);
+        }
 
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        examSseService.registerEmitter(role, userId, emitter);
+
+        final Long uId = userId;
         emitter.onCompletion(() -> {
-            log.info("SSE exam events: emitter completed for role={}", role);
-            examSseService.removeEmitter(role, emitter);
+            log.info("SSE exam events: emitter completed for role={} userId={}", role, uId);
+            examSseService.removeEmitter(role, uId, emitter);
         });
 
         emitter.onTimeout(() -> {
-            log.info("SSE exam events: emitter timed out for role={}", role);
-            examSseService.removeEmitter(role, emitter);
+            log.info("SSE exam events: emitter timed out for role={} userId={}", role, uId);
+            examSseService.removeEmitter(role, uId, emitter);
         });
 
         emitter.onError(e -> {
-            log.warn("SSE exam events: emitter error for role={}: {}", role, e.getMessage());
-            examSseService.removeEmitter(role, emitter);
+            log.warn("SSE exam events: emitter error for role={} userId={}: {}", role, uId, e.getMessage());
+            examSseService.removeEmitter(role, uId, emitter);
         });
 
-        // Send initial SNAPSHOT
+        // Send initial SNAPSHOT (admins/contributors get global counters; users still get a hello frame)
         try {
             ExamSseEvent snapshot = ExamSseEvent.snapshot(
                     examSseService.getActiveAttemptCount(),
@@ -81,7 +96,7 @@ public class ExamSseController {
             log.warn("Failed to send exam SSE snapshot");
         }
 
-        log.info("SSE exam events: connected for role={}", role);
+        log.info("SSE exam events: connected for role={} userId={}", role, userId);
         return emitter;
     }
 
@@ -93,5 +108,20 @@ public class ExamSseController {
             return accessTokenCookie;
         }
         return null;
+    }
+
+    private Long extractUserId(Jwt jwt) {
+        Object claim = jwt.getClaims().get("userId");
+        if (claim == null) {
+            return null;
+        }
+        if (claim instanceof Number n) {
+            return n.longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(claim));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 }
