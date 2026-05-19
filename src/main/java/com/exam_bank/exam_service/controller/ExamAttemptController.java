@@ -1,6 +1,7 @@
 package com.exam_bank.exam_service.controller;
 
 import com.exam_bank.exam_service.dto.AttemptResultResponse;
+import com.exam_bank.exam_service.dto.GradeAnswerRequest;
 import com.exam_bank.exam_service.dto.AttemptSummaryResponse;
 import com.exam_bank.exam_service.dto.SaveAttemptAnswerRequest;
 import com.exam_bank.exam_service.dto.SaveAttemptAnswersBatchRequest;
@@ -12,6 +13,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -85,5 +87,23 @@ public class ExamAttemptController {
         List<AttemptSummaryResponse> history = examAttemptService.getAttemptHistory(userId);
         log.info("getMyAttempts: userId={}, historyCount={}", userId, history.size());
         return ResponseEntity.ok(history);
+    }
+
+    // =========================================================================
+    // API DÀNH CHO CONTRIBUTOR (NGHIỆP VỤ CHẤM BÀI TỰ LUẬN)
+    // =========================================================================
+
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
+    @PutMapping("/attempts/{attemptId}/answers/{answerId}/grade")
+    public ResponseEntity<Void> gradeEssayAnswer(
+            @PathVariable Long attemptId,
+            @PathVariable Long answerId,
+            @Valid @RequestBody GradeAnswerRequest request) { // DTO chứa điểm và nhận xét
+
+        Long contributorId = authenticatedUserService.getCurrentUserId();
+        examAttemptService.gradeAnswer(attemptId, answerId, contributorId, request);
+        log.info("gradeEssayAnswer: attemptId={}, answerId={}, contributorId={}, score={}",
+                attemptId, answerId, contributorId, request.getScore());
+        return ResponseEntity.noContent().build();
     }
 }

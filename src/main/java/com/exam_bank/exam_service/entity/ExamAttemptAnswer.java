@@ -52,4 +52,10 @@ public class ExamAttemptAnswer extends BaseEntity {
     @Column(name = "answer_change_count")
     @ColumnDefault("0")
     private Integer answerChangeCount = 0;
+
+    @Column(name = "text_answer", columnDefinition = "TEXT")
+    private String textAnswer; // Câu trả lời tự luận của học sinh
+
+    @Column(name = "teacher_feedback", columnDefinition = "TEXT")
+    private String teacherFeedback; // Lời phê/nhận xét của Contributor
 }

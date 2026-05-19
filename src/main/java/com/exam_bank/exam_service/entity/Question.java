@@ -27,6 +27,17 @@ public class Question extends BaseEntity {
         }
     }
 
+    public enum QuestionStatus {
+        DRAFT,              // Bản nháp
+        PENDING_APPROVAL,   // Chờ duyệt
+        APPROVED,           // Đã duyệt (Được đưa vào ngân hàng đề)
+        REJECTED            // Bị từ chối
+    }
+
+    @Column(name = "status", length = 30)
+    @Enumerated(EnumType.STRING)
+    private QuestionStatus status = QuestionStatus.DRAFT;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "exam_id", nullable = false)
     private OnlineExam exam;
