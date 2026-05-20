@@ -24,10 +24,14 @@ import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE, properties = {
-        "spring.main.lazy-initialization=true",
-        "spring.jpa.hibernate.ddl-auto=update"
-})
+@SpringBootTest(
+        classes = com.exam_bank.exam_service.ExamServiceApplication.class,
+        webEnvironment = SpringBootTest.WebEnvironment.NONE,
+        properties = {
+                "spring.main.lazy-initialization=true",
+                "spring.jpa.hibernate.ddl-auto=update"
+        }
+)
 @DisplayName("Exam Infrastructure Integration Test")
 @SuppressWarnings("resource")
 class ExamInfrastructureIntegrationTest {
@@ -73,8 +77,8 @@ class ExamInfrastructureIntegrationTest {
     @DisplayName("connects to Postgres, Redis, and RabbitMQ containers")
     void connectsToPostgresRedisAndRabbitMq() throws Exception {
         try (Connection connection = dataSource.getConnection();
-                Statement statement = connection.createStatement();
-                ResultSet resultSet = statement.executeQuery("SELECT 1")) {
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SELECT 1")) {
             assertThat(resultSet.next()).isTrue();
             assertThat(resultSet.getInt(1)).isEqualTo(1);
         }

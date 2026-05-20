@@ -286,16 +286,14 @@ public class ExamAttemptService {
         double scoreMax = 0.0;
 
         for (ExamFlowCacheService.QuestionSnapshot question : questions) {
-            Set<Long> selectedIds = decodeOptionIds(
-                    Optional.ofNullable(answerByQuestionId.get(question.questionId()))
-                            .map(ExamAttemptAnswer::getSelectedOptionIds)
-                            .orElse(null));
+            ExamAttemptAnswer answer = answerByQuestionId.get(question.questionId());
+            Set<Long> selectedIds = decodeOptionIds(answer != null ? answer.getSelectedOptionIds() : null);
             Set<Long> correctIds = correctOptionIdsByQuestionId.getOrDefault(question.questionId(), Set.of());
+
             double maxScore = question.scoreWeight() == null ? 1.0 : question.scoreWeight();
             boolean isCorrect = !selectedIds.isEmpty() && selectedIds.equals(correctIds);
             double earnedScore = isCorrect ? maxScore : 0.0;
 
-            ExamAttemptAnswer answer = answerByQuestionId.get(question.questionId());
             if (answer == null) {
                 answer = new ExamAttemptAnswer();
                 answer.setAttempt(attempt);
@@ -316,20 +314,16 @@ public class ExamAttemptService {
 
         attempt.setSubmittedAt(Instant.now());
         attempt.setDurationSeconds(Duration.between(attempt.getStartedAt(), attempt.getSubmittedAt()).toSeconds());
-        attempt.setScoreRaw(round2(scoreRaw));
-        attempt.setScoreMax(round2(scoreMax));
-        double scorePercent = scoreMax <= 0 ? 0.0 : (scoreRaw * 100.0 / scoreMax);
-        attempt.setScorePercent(round2(scorePercent));
-        int passingScore = attempt.getExam().getPassingScore() == null ? 0 : attempt.getExam().getPassingScore();
-        double requiredRawScore = resolveRequiredRawScore(scoreMax, passingScore);
-        attempt.setPassed(scoreRaw >= requiredRawScore);
+
+        // Gọi hàm dùng chung để tính điểm
+        updateAttemptScores(attempt, scoreRaw, scoreMax);
+
         attempt.setStatus(autoSubmitted ? ExamAttemptStatus.AUTO_SUBMITTED : ExamAttemptStatus.SUBMITTED);
         examAttemptRepository.save(attempt);
 
         createReviewEvents(attempt, questions, answerByQuestionId);
         publishExamSubmittedEvent(attempt, questionBank, answerByQuestionId);
 
-        // Publish admin alert
         String userDisplayName = authUserLookupClient.findDisplayNameByUserId(attempt.getUserId())
                 .orElse("Thành viên");
         adminAlertPublisher.publishExamSubmittedAlert(
@@ -342,8 +336,8 @@ public class ExamAttemptService {
     }
 
     private void publishExamSubmittedEvent(ExamAttempt attempt,
-            ExamFlowCacheService.QuestionBankSnapshot questionBank,
-            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+                                           ExamFlowCacheService.QuestionBankSnapshot questionBank,
+                                           Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         ExamSubmittedEvent event = new ExamSubmittedEvent();
         event.setAttemptId(attempt.getId());
         event.setUserId(attempt.getUserId());
@@ -363,17 +357,19 @@ public class ExamAttemptService {
             String correctOptionIds = encodeOptionIds(questionBank.correctOptionIdsByQuestionId()
                     .getOrDefault(qs.questionId(), Set.of()));
 
+            double weight = qs.scoreWeight() == null ? 1.0 : qs.scoreWeight(); // Tối ưu: Dùng biến chung
+
             QuestionAnswered qe = new QuestionAnswered();
             qe.setQuestionId(qs.questionId());
-            qe.setIsCorrect(Boolean.TRUE.equals(answer != null ? answer.getIsCorrect() : null));
+            qe.setIsCorrect(answer != null && Boolean.TRUE.equals(answer.getIsCorrect()));
             qe.setEarnedScore(answer == null ? 0.0 : answer.getEarnedScore());
-            qe.setMaxScore(qs.scoreWeight() == null ? 1.0 : qs.scoreWeight());
+            qe.setMaxScore(weight);
             qe.setSelectedOptionIds(selectedOptionIds);
             qe.setCorrectOptionIds(correctOptionIds);
             qe.setResponseTimeMs(answer == null ? null : answer.getResponseTimeMs());
             qe.setAnswerChangeCount(answer == null ? 0 : answer.getAnswerChangeCount());
-            qe.setDifficulty(qs.scoreWeight() == null ? 1.0 : qs.scoreWeight());
-            // tagIds from exam tags
+            qe.setDifficulty(weight);
+
             if (attempt.getExam().getTags() != null) {
                 qe.setTagIds(attempt.getExam().getTags().stream()
                         .map(tag -> String.valueOf(tag.getId()))
@@ -386,35 +382,36 @@ public class ExamAttemptService {
 
         List<TagInfo> tagInfos = attempt.getExam().getTags() == null ? List.of()
                 : attempt.getExam().getTags().stream()
-                        .map(tag -> {
-                            TagInfo ti = new TagInfo();
-                            ti.setTagId(tag.getId());
-                            ti.setTagName(tag.getName());
-                            return ti;
-                        })
-                        .toList();
+                .map(tag -> {
+                    TagInfo ti = new TagInfo();
+                    ti.setTagId(tag.getId());
+                    ti.setTagName(tag.getName());
+                    return ti;
+                })
+                .toList();
         event.setExamTags(tagInfos);
 
         rabbitMQEventPublisher.publishExamSubmitted(event);
     }
 
     private void createReviewEvents(ExamAttempt attempt,
-            List<ExamFlowCacheService.QuestionSnapshot> questions,
-            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+                                    List<ExamFlowCacheService.QuestionSnapshot> questions,
+                                    Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         questionReviewEventRepository.deleteByAttemptId(attempt.getId());
 
         String topicTagIds = attempt.getExam().getTags() == null
                 ? ""
                 : attempt.getExam().getTags().stream()
-                        .map(tag -> String.valueOf(tag.getId()))
-                        .sorted()
-                        .collect(Collectors.joining(","));
+                .map(tag -> String.valueOf(tag.getId()))
+                .sorted()
+                .collect(Collectors.joining(","));
 
         List<QuestionReviewEvent> events = new ArrayList<>();
         for (ExamFlowCacheService.QuestionSnapshot question : questions) {
             ExamAttemptAnswer answer = answerByQuestionId.get(question.questionId());
             Set<Long> selectedIds = decodeOptionIds(answer.getSelectedOptionIds());
             int quality = mapQuality(answer, selectedIds);
+            double weight = question.scoreWeight() == null ? 1.0 : question.scoreWeight();
 
             QuestionReviewEvent event = new QuestionReviewEvent();
             event.setUserId(attempt.getUserId());
@@ -425,11 +422,10 @@ public class ExamAttemptService {
             event.setIsCorrect(Boolean.TRUE.equals(answer.getIsCorrect()));
             event.setLatencyMs(answer.getResponseTimeMs());
             event.setTopicTagIds(topicTagIds);
-            event.setDifficulty(question.scoreWeight() == null ? 1.0 : question.scoreWeight());
+            event.setDifficulty(weight);
             event.setSource("EXAM_SUBMISSION");
             events.add(event);
 
-            // Record SM2 spaced-repetition
             sm2Service.recordAttempt(attempt.getUserId(), question.questionId(), quality);
         }
 
@@ -459,35 +455,23 @@ public class ExamAttemptService {
         return 3;
     }
 
-    /**
-     * Map answer quality to user-specific difficulty based on performance in this
-     * attempt.
-     * Unlike the global Question.difficulty (which needs ≥10 historical attempts),
-     * this is per-attempt difficulty so users immediately see feedback.
-     */
     private Question.Difficulty mapQualityToDifficulty(ExamAttemptAnswer answer) {
         if (answer == null) {
             return Question.Difficulty.MEDIUM;
         }
         int quality = mapQuality(answer, decodeOptionIds(answer.getSelectedOptionIds()));
-        // quality 5 = fast & correct → Easy for this user
         if (quality >= 4) {
             return Question.Difficulty.EASY;
         }
-        // quality 3 = slow but correct → Medium for this user
         if (quality >= 3) {
             return Question.Difficulty.MEDIUM;
         }
-        // quality 1 = wrong → Hard for this user
-        // quality 0 = skipped → Very Hard for this user
         return quality == 0 ? Question.Difficulty.VERY_HARD : Question.Difficulty.HARD;
     }
 
-    // Overload: use pre-loaded data (avoids redundant DB query in submitAttempt
-    // path)
     private AttemptResultResponse buildAttemptResult(ExamAttempt attempt,
-            ExamFlowCacheService.QuestionBankSnapshot questionBank,
-            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+                                                     ExamFlowCacheService.QuestionBankSnapshot questionBank,
+                                                     Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         if (questionBank == null) {
             questionBank = examFlowCacheService.getOrLoadQuestionBank(
                     attempt.getExam().getId(),
@@ -503,8 +487,8 @@ public class ExamAttemptService {
     }
 
     private AttemptResultResponse doBuildResult(ExamAttempt attempt,
-            ExamFlowCacheService.QuestionBankSnapshot questionBank,
-            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+                                                ExamFlowCacheService.QuestionBankSnapshot questionBank,
+                                                Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         AttemptResultResponse response = new AttemptResultResponse();
         response.setAttemptId(attempt.getId());
         response.setExamId(attempt.getExam().getId());
@@ -522,15 +506,16 @@ public class ExamAttemptService {
         List<AttemptResultResponse.QuestionResult> questionResults = new ArrayList<>();
         for (ExamFlowCacheService.QuestionSnapshot question : questionBank.questions()) {
             ExamAttemptAnswer answer = answerByQuestionId.get(question.questionId());
+            double weight = question.scoreWeight() == null ? 1.0 : question.scoreWeight();
+
             AttemptResultResponse.QuestionResult item = new AttemptResultResponse.QuestionResult();
             item.setQuestionId(question.questionId());
             item.setContent(question.content());
-            item.setMaxScore(question.scoreWeight() == null ? 1.0 : question.scoreWeight());
+            item.setMaxScore(weight);
             item.setEarnedScore(answer == null ? 0.0 : answer.getEarnedScore());
             item.setCorrect(answer != null && Boolean.TRUE.equals(answer.getIsCorrect()));
             item.setResponseTimeMs(answer == null ? null : answer.getResponseTimeMs());
             item.setAnswerChangeCount(answer == null ? 0 : answer.getAnswerChangeCount());
-            // Độ khó cá nhân: dựa trên quality của user cho câu này
             item.setDifficulty(mapQualityToDifficulty(answer));
 
             List<AttemptResultResponse.OptionResult> optionResults = questionBank.optionsByQuestionId()
@@ -580,11 +565,10 @@ public class ExamAttemptService {
             return "";
         }
 
+        // Tối ưu: Loại bỏ các bước chuyển đổi Map dư thừa
         return ids.stream()
                 .filter(Objects::nonNull)
-                .map(Long::valueOf)
-                .collect(Collectors.toCollection(HashSet::new))
-                .stream()
+                .distinct()
                 .sorted(Comparator.naturalOrder())
                 .map(String::valueOf)
                 .collect(Collectors.joining(","));
@@ -679,5 +663,50 @@ public class ExamAttemptService {
         }
 
         return Math.max(1, Math.min(2, configured));
+    }
+
+    private void updateAttemptScores(ExamAttempt attempt, double scoreRaw, double scoreMax) {
+        attempt.setScoreRaw(round2(scoreRaw));
+        attempt.setScoreMax(round2(scoreMax));
+
+        double scorePercent = scoreMax <= 0 ? 0.0 : (scoreRaw * 100.0 / scoreMax);
+        attempt.setScorePercent(round2(scorePercent));
+
+        int passingScore = attempt.getExam().getPassingScore() == null ? 0 : attempt.getExam().getPassingScore();
+        double requiredRawScore = resolveRequiredRawScore(scoreMax, passingScore);
+        attempt.setPassed(scoreRaw >= requiredRawScore);
+    }
+
+    @Transactional
+    public void gradeAnswer(Long attemptId, Long answerId, Long contributorId, com.exam_bank.exam_service.dto.GradeAnswerRequest request) {
+        ExamAttempt attempt = examAttemptRepository.findById(attemptId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Attempt not found"));
+
+        ExamAttemptAnswer answer = examAttemptAnswerRepository.findById(answerId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Answer not found"));
+
+        if (!answer.getAttempt().getId().equals(attemptId)) {
+            throw new ResponseStatusException(BAD_REQUEST, "Answer does not belong to this attempt");
+        }
+
+        answer.setEarnedScore(request.getScore());
+        answer.setTeacherFeedback(request.getTeacherFeedback());
+        examAttemptAnswerRepository.save(answer);
+
+        List<ExamAttemptAnswer> allAnswers = examAttemptAnswerRepository.findByAttemptIdOrderByQuestionIdAsc(attemptId);
+        double scoreRaw = 0.0;
+        double scoreMax = 0.0;
+
+        for (ExamAttemptAnswer a : allAnswers) {
+            scoreRaw += a.getEarnedScore() == null ? 0.0 : a.getEarnedScore();
+            scoreMax += a.getMaxScore() == null ? 0.0 : a.getMaxScore();
+        }
+
+        // Gọi hàm dùng chung để cập nhật điểm
+        updateAttemptScores(attempt, scoreRaw, scoreMax);
+        examAttemptRepository.save(attempt);
+
+        log.info("gradeAnswer: attemptId={}, answerId={}, contributorId={}, newScore={}",
+                attemptId, answerId, contributorId, request.getScore());
     }
 }
