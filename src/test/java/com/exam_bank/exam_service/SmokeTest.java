@@ -27,6 +27,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -71,10 +72,21 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: initiate upload returns valid response")
     void smoke_initiateUpload_returnsValidResponse() {
+        // Dạy cho mock properties biết được phép upload file gì
+        when(properties.getAllowedContentTypes()).thenReturn(List.of("application/pdf"));
+        when(properties.getMaxPages()).thenReturn(20);
+
+        // Dạy cho các service khác
         when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
         when(minioService.buildObjectKey(anyLong(), anyLong(), anyInt(), any())).thenReturn("key");
         when(minioService.generatePresignedPutUrl(any(), any(), anyInt())).thenReturn("url");
-        when(uploadRequestRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Dạy mock Repository cách trả về object có ID
+        when(uploadRequestRepository.save(any())).thenAnswer(inv -> {
+            ExamUploadRequest req = inv.getArgument(0);
+            req.setId(1L);
+            return req;
+        });
 
         InitiateUploadRequest req = new InitiateUploadRequest();
         req.setTitle("test.pdf");
@@ -99,7 +111,7 @@ class SmokeTest {
         request.setStatus(ExamUploadStatus.PENDING_APPROVAL);
         request.setKeys(List.of("key1", "key2"));
 
-        when(uploadRequestRepository.findById(1L)).thenReturn(java.util.Optional.of(request));
+        when(uploadRequestRepository.findById(1L)).thenReturn(Optional.of(request));
         when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
         when(uploadRequestRepository.save(any())).thenAnswer(inv -> {
             ExamUploadRequest e = inv.getArgument(0);
@@ -148,8 +160,18 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: upload request is saved with correct properties")
     void smoke_uploadRequestIsSavedWithCorrectProperties() {
+        // Cần phải có đầy đủ các khai báo giống như test 1 thì code mới chạy mượt được
         when(properties.getAllowedContentTypes()).thenReturn(List.of("application/pdf"));
         when(properties.getMaxPages()).thenReturn(20);
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
+        when(minioService.buildObjectKey(anyLong(), anyLong(), anyInt(), any())).thenReturn("key");
+        when(minioService.generatePresignedPutUrl(any(), any(), anyInt())).thenReturn("url");
+
+        when(uploadRequestRepository.save(any())).thenAnswer(inv -> {
+            ExamUploadRequest req = inv.getArgument(0);
+            req.setId(99L); // Giả lập ID
+            return req;
+        });
 
         InitiateUploadRequest req = new InitiateUploadRequest();
         req.setTitle("test.pdf");
@@ -160,7 +182,7 @@ class SmokeTest {
         InitiateUploadResponse response = uploadService.initiateUpload(req);
 
         assertThat(response).isNotNull();
-        assertThat(response.getUploadId()).isNotNull();
+        assertThat(response.getUploadId()).isEqualTo(99L);
         assertThat(response.getPages()).hasSize(3);
     }
 }
