@@ -16,6 +16,7 @@ import com.exam_bank.exam_service.feature.upload.dto.ExamUploadPageResponse;
 import com.exam_bank.exam_service.feature.upload.dto.ExamUploadResponse;
 import com.exam_bank.exam_service.feature.upload.entity.ExamUploadRequest;
 import com.exam_bank.exam_service.feature.upload.entity.ExamUploadStatus;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -72,20 +73,17 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: initiate upload returns valid response")
     void smoke_initiateUpload_returnsValidResponse() {
-        // Dạy cho mock properties biết được phép upload file gì
+        // Setup stubs needed for this test
         when(properties.getAllowedContentTypes()).thenReturn(List.of("application/pdf"));
         when(properties.getMaxPages()).thenReturn(20);
-
-        // Dạy cho các service khác
         when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
         when(minioService.buildObjectKey(anyLong(), anyLong(), anyInt(), any())).thenReturn("key");
         when(minioService.generatePresignedPutUrl(any(), any(), anyInt())).thenReturn("url");
-
-        // Dạy mock Repository cách trả về object có ID
         when(uploadRequestRepository.save(any())).thenAnswer(inv -> {
-            ExamUploadRequest req = inv.getArgument(0);
-            req.setId(1L);
-            return req;
+            ExamUploadRequest e = inv.getArgument(0);
+            if (e.getId() == null)
+                e.setId(1L);
+            return e;
         });
 
         InitiateUploadRequest req = new InitiateUploadRequest();
@@ -104,6 +102,9 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: complete upload with valid request succeeds")
     void smoke_completeUpload_succeeds() {
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
+        when(uploadRequestRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
         ExamUploadRequest request = new ExamUploadRequest();
         request.setId(1L);
         request.setUploaderId(123L);
@@ -112,13 +113,6 @@ class SmokeTest {
         request.setKeys(List.of("key1", "key2"));
 
         when(uploadRequestRepository.findById(1L)).thenReturn(Optional.of(request));
-        when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
-        when(uploadRequestRepository.save(any())).thenAnswer(inv -> {
-            ExamUploadRequest e = inv.getArgument(0);
-            if (e.getId() == null)
-                e.setId(1L);
-            return e;
-        });
 
         CompleteUploadRequest completeReq = new CompleteUploadRequest();
         completeReq.setNote("done");
@@ -160,17 +154,16 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: upload request is saved with correct properties")
     void smoke_uploadRequestIsSavedWithCorrectProperties() {
-        // Cần phải có đầy đủ các khai báo giống như test 1 thì code mới chạy mượt được
+        // Setup stubs
         when(properties.getAllowedContentTypes()).thenReturn(List.of("application/pdf"));
         when(properties.getMaxPages()).thenReturn(20);
         when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
         when(minioService.buildObjectKey(anyLong(), anyLong(), anyInt(), any())).thenReturn("key");
         when(minioService.generatePresignedPutUrl(any(), any(), anyInt())).thenReturn("url");
-
         when(uploadRequestRepository.save(any())).thenAnswer(inv -> {
-            ExamUploadRequest req = inv.getArgument(0);
-            req.setId(99L); // Giả lập ID
-            return req;
+            ExamUploadRequest e = inv.getArgument(0);
+            e.setId(99L);
+            return e;
         });
 
         InitiateUploadRequest req = new InitiateUploadRequest();
@@ -181,6 +174,8 @@ class SmokeTest {
 
         InitiateUploadResponse response = uploadService.initiateUpload(req);
 
+        // Verify repository save was called (initiateUpload calls save twice)
+        verify(uploadRequestRepository, times(2)).save(any(ExamUploadRequest.class));
         assertThat(response).isNotNull();
         assertThat(response.getUploadId()).isEqualTo(99L);
         assertThat(response.getPages()).hasSize(3);
