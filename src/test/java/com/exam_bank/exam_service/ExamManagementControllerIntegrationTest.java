@@ -78,7 +78,7 @@ class ExamManagementControllerIntegrationTest {
     @Value("${auth.jwt.issuer}")
     private String jwtIssuer;
 
-    private static final String BASE = "/api/v1/exam";
+    private static final String BASE = "";
 
     private JwtEncoder jwtEncoder;
     private final List<Long> createdExamIds = new ArrayList<>();
@@ -137,7 +137,8 @@ class ExamManagementControllerIntegrationTest {
     }
 
     private ExamResponse createExamViaApi(String adminToken) {
-        CreateExamRequest request = buildCreateExamRequest("Integration Test Exam " + UUID.randomUUID().toString().substring(0, 8));
+        CreateExamRequest request = buildCreateExamRequest(
+                "Integration Test Exam " + UUID.randomUUID().toString().substring(0, 8));
         HttpHeaders headers = bearerJsonHeaders(adminToken);
         ResponseEntity<ExamResponse> response = restTemplate.exchange(
                 BASE + "/exams", HttpMethod.POST,
@@ -175,7 +176,8 @@ class ExamManagementControllerIntegrationTest {
     @DisplayName("createExam_asAdmin_shouldReturn200WithExamResponse")
     void createExam_asAdmin_shouldReturn200WithExamResponse() {
         String adminToken = generateToken(1L, "ADMIN");
-        CreateExamRequest request = buildCreateExamRequest("IT Create Test " + UUID.randomUUID().toString().substring(0, 8));
+        CreateExamRequest request = buildCreateExamRequest(
+                "IT Create Test " + UUID.randomUUID().toString().substring(0, 8));
 
         HttpHeaders headers = bearerJsonHeaders(adminToken);
         ResponseEntity<ExamResponse> response = restTemplate.exchange(
@@ -296,7 +298,8 @@ class ExamManagementControllerIntegrationTest {
         String adminToken = generateToken(1L, "ADMIN");
         ExamResponse created = createExamViaApi(adminToken);
 
-        CreateExamRequest updateRequest = buildCreateExamRequest("Updated Title " + UUID.randomUUID().toString().substring(0, 8));
+        CreateExamRequest updateRequest = buildCreateExamRequest(
+                "Updated Title " + UUID.randomUUID().toString().substring(0, 8));
 
         HttpHeaders headers = bearerJsonHeaders(adminToken);
         ResponseEntity<ExamResponse> response = restTemplate.exchange(
