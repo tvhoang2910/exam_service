@@ -16,6 +16,7 @@ import com.exam_bank.exam_service.feature.upload.dto.ExamUploadPageResponse;
 import com.exam_bank.exam_service.feature.upload.dto.ExamUploadResponse;
 import com.exam_bank.exam_service.feature.upload.entity.ExamUploadRequest;
 import com.exam_bank.exam_service.feature.upload.entity.ExamUploadStatus;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -71,10 +72,18 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: initiate upload returns valid response")
     void smoke_initiateUpload_returnsValidResponse() {
+        // Setup stubs needed for this test
+        when(properties.getAllowedContentTypes()).thenReturn(List.of("application/pdf"));
+        when(properties.getMaxPages()).thenReturn(20);
         when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
         when(minioService.buildObjectKey(anyLong(), anyLong(), anyInt(), any())).thenReturn("key");
         when(minioService.generatePresignedPutUrl(any(), any(), anyInt())).thenReturn("url");
-        when(uploadRequestRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(uploadRequestRepository.save(any())).thenAnswer(inv -> {
+            ExamUploadRequest e = inv.getArgument(0);
+            if (e.getId() == null)
+                e.setId(1L);
+            return e;
+        });
 
         InitiateUploadRequest req = new InitiateUploadRequest();
         req.setTitle("test.pdf");
@@ -92,6 +101,9 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: complete upload with valid request succeeds")
     void smoke_completeUpload_succeeds() {
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
+        when(uploadRequestRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
         ExamUploadRequest request = new ExamUploadRequest();
         request.setId(1L);
         request.setUploaderId(123L);
@@ -100,13 +112,6 @@ class SmokeTest {
         request.setKeys(List.of("key1", "key2"));
 
         when(uploadRequestRepository.findById(1L)).thenReturn(java.util.Optional.of(request));
-        when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
-        when(uploadRequestRepository.save(any())).thenAnswer(inv -> {
-            ExamUploadRequest e = inv.getArgument(0);
-            if (e.getId() == null)
-                e.setId(1L);
-            return e;
-        });
 
         CompleteUploadRequest completeReq = new CompleteUploadRequest();
         completeReq.setNote("done");
@@ -148,8 +153,18 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: upload request is saved with correct properties")
     void smoke_uploadRequestIsSavedWithCorrectProperties() {
+        // Setup stubs
         when(properties.getAllowedContentTypes()).thenReturn(List.of("application/pdf"));
         when(properties.getMaxPages()).thenReturn(20);
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(123L);
+        when(minioService.buildObjectKey(anyLong(), anyLong(), anyInt(), any())).thenReturn("key");
+        when(minioService.generatePresignedPutUrl(any(), any(), anyInt())).thenReturn("url");
+        when(uploadRequestRepository.save(any())).thenAnswer(inv -> {
+            ExamUploadRequest e = inv.getArgument(0);
+            if (e.getId() == null)
+                e.setId(1L);
+            return e;
+        });
 
         InitiateUploadRequest req = new InitiateUploadRequest();
         req.setTitle("test.pdf");
@@ -159,6 +174,8 @@ class SmokeTest {
 
         InitiateUploadResponse response = uploadService.initiateUpload(req);
 
+        // Verify repository save was called (initiateUpload calls save twice)
+        verify(uploadRequestRepository, times(2)).save(any(ExamUploadRequest.class));
         assertThat(response).isNotNull();
         assertThat(response.getUploadId()).isNotNull();
         assertThat(response.getPages()).hasSize(3);
