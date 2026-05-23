@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
@@ -53,6 +54,11 @@ import static org.mockito.Mockito.when;
 @AutoConfigureTestRestTemplate
 @DisplayName("ExamManagementController Integration Tests")
 class ExamManagementControllerIntegrationTest {
+
+    private static final ParameterizedTypeReference<Map<String, Object>> MAP_OBJECT_TYPE = new ParameterizedTypeReference<>() {
+    };
+    private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP_OBJECT_TYPE = new ParameterizedTypeReference<>() {
+    };
 
     @Autowired
     private TestRestTemplate restTemplate;
@@ -198,8 +204,8 @@ class ExamManagementControllerIntegrationTest {
     void createExam_unauthenticated_shouldReturn401() {
         CreateExamRequest request = buildCreateExamRequest("Unauthenticated Exam");
 
-        ResponseEntity<Map> response = restTemplate.postForEntity(
-                BASE + "/exams", request, Map.class);
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                BASE + "/exams", HttpMethod.POST, new HttpEntity<>(request), MAP_OBJECT_TYPE);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
@@ -209,8 +215,8 @@ class ExamManagementControllerIntegrationTest {
     @Test
     @DisplayName("getPublicExams_noAuth_shouldReturn200WithList")
     void getPublicExams_noAuth_shouldReturn200WithList() {
-        ResponseEntity<List> response = restTemplate.getForEntity(
-                BASE + "/exams/public", List.class);
+        ResponseEntity<List<Map<String, Object>>> response = restTemplate.exchange(
+                BASE + "/exams/public", HttpMethod.GET, HttpEntity.EMPTY, LIST_MAP_OBJECT_TYPE);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isNotNull();
@@ -241,8 +247,8 @@ class ExamManagementControllerIntegrationTest {
     @Test
     @DisplayName("getPublicExam_notFound_shouldReturn404")
     void getPublicExam_notFound_shouldReturn404() {
-        ResponseEntity<Map> response = restTemplate.getForEntity(
-                BASE + "/exams/public/999999999", Map.class);
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                BASE + "/exams/public/999999999", HttpMethod.GET, HttpEntity.EMPTY, MAP_OBJECT_TYPE);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
@@ -254,8 +260,8 @@ class ExamManagementControllerIntegrationTest {
         ExamResponse created = createExamViaApi(adminToken);
 
         // DRAFT exams should not be accessible from public endpoint
-        ResponseEntity<Map> response = restTemplate.getForEntity(
-                BASE + "/exams/public/" + created.getId(), Map.class);
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                BASE + "/exams/public/" + created.getId(), HttpMethod.GET, HttpEntity.EMPTY, MAP_OBJECT_TYPE);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
@@ -269,9 +275,9 @@ class ExamManagementControllerIntegrationTest {
         createExamViaApi(adminToken);
 
         HttpHeaders headers = bearerHeaders(adminToken);
-        ResponseEntity<List> response = restTemplate.exchange(
+        ResponseEntity<List<Map<String, Object>>> response = restTemplate.exchange(
                 BASE + "/exams/manage", HttpMethod.GET,
-                new HttpEntity<>(headers), List.class);
+                new HttpEntity<>(headers), LIST_MAP_OBJECT_TYPE);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isNotNull();
@@ -283,9 +289,9 @@ class ExamManagementControllerIntegrationTest {
         String userToken = generateToken(2L, "USER");
         HttpHeaders headers = bearerHeaders(userToken);
 
-        ResponseEntity<Map> response = restTemplate.exchange(
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
                 BASE + "/exams/manage", HttpMethod.GET,
-                new HttpEntity<>(headers), Map.class);
+                new HttpEntity<>(headers), MAP_OBJECT_TYPE);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }

@@ -41,6 +41,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.io.InputStream;
 
 @Service
 @RequiredArgsConstructor
@@ -135,6 +136,10 @@ public class ExamUploadService {
         if (selfUpload) {
             adminAlertPublisher.publishSelfUploadAudit(saved.getId(), saved.getTitle(), saved.getUploaderId(),
                     saved.getUploaderRole());
+            ExamUploadRequest extracting = startExtraction(saved, userId, role, next);
+            log.info("Upload {} self-uploaded by user {} (role={}, EXTRACTING)",
+                    extracting.getId(), userId, role);
+            return toResponse(extracting, false);
         } else {
             adminAlertPublisher.publishUploadSubmittedAlert(saved.getId(), saved.getTitle(), saved.getUploaderId(),
                     null);
@@ -161,7 +166,7 @@ public class ExamUploadService {
     public ExamUploadPageResponse listPendingQueue(int page, int size) {
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.max(size, 1),
                 Sort.by(Sort.Direction.ASC, "createdAt"));
-        Page<ExamUploadRequest> result = uploadRequestRepository.findByStatus(ExamUploadStatus.PENDING_APPROVAL,
+        Page<ExamUploadRequest> result = uploadRequestRepository.findSubmittedByStatus(ExamUploadStatus.PENDING_APPROVAL,
                 pageable);
         return ExamUploadPageResponse.from(result.map(e -> toResponse(e, false)));
     }
@@ -175,6 +180,25 @@ public class ExamUploadService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this upload");
         }
         return toResponse(entity, true);
+    }
+
+    @Transactional(readOnly = true)
+    public UploadPageStream getUploadPageStream(Long uploadId, int pageIndex) {
+        Long userId = authenticatedUserService.getCurrentUserId();
+        String role = currentRole();
+        ExamUploadRequest entity = loadOrThrow(uploadId);
+        if (!entity.getUploaderId().equals(userId) && !isAdminOrContributor(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this upload");
+        }
+
+        List<String> keys = entity.getKeys();
+        if (pageIndex < 1 || pageIndex > keys.size()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Upload page not found: " + pageIndex);
+        }
+
+        String objectKey = keys.get(pageIndex - 1);
+        InputStream inputStream = minioService.getObject(objectKey);
+        return new UploadPageStream(inputStream, entity.getContentType(), objectKey);
     }
 
     @Transactional(readOnly = true)
@@ -204,59 +228,19 @@ public class ExamUploadService {
         }
 
         ExamUploadStatus previous = entity.getStatus();
-        List<String> keys = entity.getKeys();
-
-        // Create a draft OnlineExam bound to this upload.
-        OnlineExam exam = new OnlineExam();
-        exam.setTitle(entity.getTitle());
-        exam.setDescription(entity.getDescription());
-        exam.setSource(OnlineExamSource.AI_EXTRACTED);
-        exam.setStatus(OnlineExamStatus.DRAFT);
-        exam.setOriginalFileUrl(String.join(",", keys));
-        exam.setOriginalFileType(entity.getContentType());
-        exam.setTotalQuestions(0);
-        OnlineExam savedExam = onlineExamRepository.save(exam);
-
         entity.setReviewedBy(reviewerId);
         entity.setReviewedAt(Instant.now());
-        entity.setExtractedExamId(savedExam.getId());
         entity.setStatus(ExamUploadStatus.APPROVED);
         uploadRequestRepository.save(entity);
         writeHistory(entity.getId(), "APPROVED", previous, ExamUploadStatus.APPROVED, reviewerId, role, null);
 
-        // Transition straight to EXTRACTING.
-        entity.setStatus(ExamUploadStatus.EXTRACTING);
-        ExamUploadRequest saved = uploadRequestRepository.save(entity);
-        writeHistory(saved.getId(), "EXTRACTION_STARTED", ExamUploadStatus.APPROVED, ExamUploadStatus.EXTRACTING,
-                reviewerId, role, null);
-
-        // Publish event to extraction service.
-        try {
-            ExamSourceUploadedEvent event = ExamSourceUploadedEvent.builder()
-                    .examId(savedExam.getId())
-                    .fileObjectName(keys.isEmpty() ? null : keys.get(0))
-                    .originalFileName(entity.getTitle())
-                    .uploadedByUserId(String.valueOf(entity.getUploaderId()))
-                    .objectKeys(keys)
-                    .pageCount(entity.getPageCount())
-                    .uploadRequestId(entity.getId())
-                    .build();
-            rabbitMQEventPublisher.publishFileUploadedEvent(event);
-        } catch (AmqpException ex) {
-            // Rollback to APPROVED so the upload can be retried, instead of leaving it in EXTRACTING.
-            entity.setStatus(ExamUploadStatus.APPROVED);
-            uploadRequestRepository.save(entity);
-            log.error("Failed to publish ExamSourceUploadedEvent for uploadRequestId={}, rolled back to APPROVED",
-                    entity.getId(), ex);
-            throw new IllegalStateException(
-                    "Failed to publish extraction event for uploadRequestId=" + entity.getId(), ex);
-        }
+        ExamUploadRequest saved = startExtraction(entity, reviewerId, role, ExamUploadStatus.APPROVED);
 
         adminAlertPublisher.publishUploadApprovedAlert(saved.getId(), saved.getTitle(), saved.getUploaderId(),
                 reviewerId);
 
         log.info("Upload {} approved by reviewer {} → examId {} (EXTRACTING)", saved.getId(), reviewerId,
-                savedExam.getId());
+                saved.getExtractedExamId());
 
         return toResponse(saved, false);
     }
@@ -319,13 +303,56 @@ public class ExamUploadService {
         historyRepository.save(h);
     }
 
+    private ExamUploadRequest startExtraction(ExamUploadRequest entity, Long actorId, String actorRole,
+            ExamUploadStatus rollbackStatus) {
+        List<String> keys = entity.getKeys();
+
+        OnlineExam exam = new OnlineExam();
+        exam.setTitle(entity.getTitle());
+        exam.setDescription(entity.getDescription());
+        exam.setSource(OnlineExamSource.AI_EXTRACTED);
+        exam.setStatus(OnlineExamStatus.DRAFT);
+        exam.setOriginalFileUrl(String.join(",", keys));
+        exam.setOriginalFileType(entity.getContentType());
+        exam.setTotalQuestions(0);
+        OnlineExam savedExam = onlineExamRepository.save(exam);
+
+        entity.setExtractedExamId(savedExam.getId());
+        entity.setStatus(ExamUploadStatus.EXTRACTING);
+        ExamUploadRequest saved = uploadRequestRepository.save(entity);
+        writeHistory(saved.getId(), "EXTRACTION_STARTED", rollbackStatus, ExamUploadStatus.EXTRACTING,
+                actorId, actorRole, null);
+
+        try {
+            ExamSourceUploadedEvent event = ExamSourceUploadedEvent.builder()
+                    .examId(savedExam.getId())
+                    .fileObjectName(keys.isEmpty() ? null : keys.get(0))
+                    .originalFileName(entity.getTitle())
+                    .uploadedByUserId(String.valueOf(entity.getUploaderId()))
+                    .objectKeys(keys)
+                    .pageCount(entity.getPageCount())
+                    .uploadRequestId(entity.getId())
+                    .build();
+            rabbitMQEventPublisher.publishFileUploadedEvent(event);
+        } catch (AmqpException ex) {
+            entity.setStatus(rollbackStatus);
+            uploadRequestRepository.save(entity);
+            log.error("Failed to publish ExamSourceUploadedEvent for uploadRequestId={}, rolled back to {}",
+                    entity.getId(), rollbackStatus, ex);
+            throw new IllegalStateException(
+                    "Failed to publish extraction event for uploadRequestId=" + entity.getId(), ex);
+        }
+
+        return saved;
+    }
+
     private ExamUploadResponse toResponse(ExamUploadRequest e, boolean includeViewUrls) {
         List<String> keys = e.getKeys();
         List<String> viewUrls = null;
         if (includeViewUrls && !keys.isEmpty()) {
             viewUrls = new ArrayList<>(keys.size());
-            for (String key : keys) {
-                viewUrls.add(minioService.generatePresignedGetUrl(key, properties.getPresignGetTtlSeconds()));
+            for (int i = 1; i <= keys.size(); i++) {
+                viewUrls.add("/api/v1/exam/uploads/" + e.getId() + "/pages/" + i);
             }
         }
         return ExamUploadResponse.builder()
@@ -387,5 +414,8 @@ public class ExamUploadService {
 
     private boolean isAdminOrContributor(String role) {
         return ROLE_ADMIN.equals(role) || ROLE_CONTRIBUTOR.equals(role);
+    }
+
+    public record UploadPageStream(InputStream inputStream, String contentType, String objectKey) {
     }
 }

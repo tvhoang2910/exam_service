@@ -209,4 +209,51 @@ public class AdminAlertPublisher {
                                         ex.getMessage(), ex);
                 }
         }
+
+        public void publishUploadExtractionCompletedAlert(Long uploadId, String title, Long reviewerId,
+                        boolean isSuccess, String errorMessage) {
+                if (reviewerId == null) {
+                        return;
+                }
+
+                String safeTitle = (title == null || title.isBlank()) ? "Đề thi" : title;
+                String type = isSuccess ? "EXAM_UPLOAD_EXTRACTED" : "EXAM_UPLOAD_EXTRACT_FAILED";
+                String headline = isSuccess ? "Trích xuất đề thi hoàn tất" : "Trích xuất đề thi thất bại";
+                String body;
+                if (isSuccess) {
+                        body = "Đề \"" + safeTitle + "\" đã trích xuất xong. Bạn có thể mở để kiểm tra.";
+                } else {
+                        String safeError = (errorMessage == null || errorMessage.isBlank())
+                                        ? "Hệ thống không thể trích xuất câu hỏi từ file."
+                                        : errorMessage.trim();
+                        if (safeError.length() > 500) {
+                                safeError = safeError.substring(0, 500) + "...";
+                        }
+                        body = "Đề \"" + safeTitle + "\" trích xuất thất bại: " + safeError;
+                }
+
+                try {
+                        Map<String, Object> metadata = new HashMap<>();
+                        metadata.put("uploadId", uploadId);
+                        metadata.put("targetUserId", reviewerId);
+                        metadata.put("title", safeTitle);
+                        metadata.put("success", isSuccess);
+                        if (!isSuccess) {
+                                metadata.put("errorMessage", errorMessage);
+                        }
+                        AdminAlertMessage message = new AdminAlertMessage(
+                                        type,
+                                        headline,
+                                        body,
+                                        List.of(),
+                                        "/admin/upload-queue",
+                                        metadata);
+                        rabbitTemplate.convertAndSend(notificationExchange, adminAlertRoutingKey, message);
+                        log.info("Published {} alert: uploadId={}, reviewerId={}, success={}", type, uploadId,
+                                        reviewerId, isSuccess);
+                } catch (AmqpException ex) {
+                        log.error("Failed to publish upload extraction alert for uploadId={}: {}", uploadId,
+                                        ex.getMessage(), ex);
+                }
+        }
 }

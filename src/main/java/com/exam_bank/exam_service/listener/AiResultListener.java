@@ -21,6 +21,13 @@ public class AiResultListener {
         log.info("=================================================");
         log.info("🚀 Nhận được kết quả AI Extraction từ search_service cho Exam ID: {}", event.getExamId());
 
+        if (event.getUploadRequestId() != null) {
+            log.info("Bỏ qua kết quả uploadRequestId={} trong listener upload-source legacy; ExtractionResultListener sẽ xử lý.",
+                    event.getUploadRequestId());
+            log.info("=================================================");
+            return;
+        }
+
         String jsonResult = event.getAiJsonResult();
 
         // Parse userId an toàn

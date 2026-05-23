@@ -11,6 +11,7 @@ import com.exam_bank.exam_service.feature.upload.repository.ExamUploadRequestRep
 import com.exam_bank.exam_service.repository.OnlineExamRepository;
 import com.exam_bank.exam_service.repository.QuestionOptionRepository;
 import com.exam_bank.exam_service.repository.QuestionRepository;
+import com.exam_bank.exam_service.util.AiJsonNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,7 @@ public class ExtractionResultService {
     private final QuestionRepository questionRepository;
     private final QuestionOptionRepository questionOptionRepository;
     private final ExamSseService examSseService;
+    private final AdminAlertPublisher adminAlertPublisher;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -72,6 +74,14 @@ public class ExtractionResultService {
         uploadRequestRepository.save(upload);
         log.warn("AI extraction failed: uploadRequestId={} examId={} error={}",
                 upload.getId(), exam.getId(), truncated);
+        examSseService.onAiExtractionCompleted(
+                exam.getId(),
+                upload.getId(),
+                upload.getExtractedExamId(),
+                upload.getReviewedBy(),
+                false,
+                truncated == null ? "AI extraction failed" : truncated);
+        notifyReviewer(upload, false, truncated);
         broadcastSseToUploader(upload.getUploaderId(), "AI_EXTRACTION_FAILED",
                 Map.of(
                         "uploadRequestId", upload.getId(),
@@ -84,8 +94,11 @@ public class ExtractionResultService {
         try {
             parsed = parseAiJson(aiJsonResult);
         } catch (Exception ex) {
-            log.error("Failed to parse AI JSON for uploadRequestId={} examId={}: {}",
-                    upload.getId(), exam.getId(), ex.getMessage(), ex);
+            String preview = aiJsonResult == null ? "" : aiJsonResult.replaceAll("\\s+", " ");
+            if (preview.length() > 1024)
+                preview = preview.substring(0, 1024) + "...";
+            log.error("Failed to parse AI JSON for uploadRequestId={} examId={} (preview={}): {}",
+                    upload.getId(), exam.getId(), preview, ex.getMessage(), ex);
             handleFailure(upload, exam, "Failed to parse AI JSON: " + ex.getMessage());
             return;
         }
@@ -111,6 +124,15 @@ public class ExtractionResultService {
 
         log.info("AI extraction succeeded: uploadRequestId={} examId={} savedQuestions={}",
                 upload.getId(), exam.getId(), savedCount);
+
+        examSseService.onAiExtractionCompleted(
+                exam.getId(),
+                upload.getId(),
+                exam.getId(),
+                upload.getReviewedBy(),
+                true,
+                "AI extraction completed successfully");
+        notifyReviewer(upload, true, null);
 
         broadcastSseToUploader(upload.getUploaderId(), "AI_EXTRACTION_SUCCESS",
                 Map.of(
@@ -152,26 +174,12 @@ public class ExtractionResultService {
     }
 
     private List<ParsedQuestion> parseAiJson(String rawJson) {
-        if (rawJson == null) {
-            return List.of();
-        }
-        String json = rawJson.trim();
-        if (json.startsWith("```")) {
-            int firstNewline = json.indexOf('\n');
-            if (firstNewline > 0) {
-                json = json.substring(firstNewline + 1);
-            } else {
-                json = json.substring(3);
-            }
-        }
-        if (json.endsWith("```")) {
-            json = json.substring(0, json.length() - 3);
-        }
-        json = json.trim();
+        String json = AiJsonNormalizer.normalizeQuestionArray(rawJson);
         if (json.isEmpty()) {
             return List.of();
         }
-        return objectMapper.readValue(json, new TypeReference<List<ParsedQuestion>>() {});
+        return objectMapper.readValue(json, new TypeReference<List<ParsedQuestion>>() {
+        });
     }
 
     private Difficulty parseDifficulty(String raw) {
@@ -186,7 +194,8 @@ public class ExtractionResultService {
     }
 
     private String truncate(String s, int max) {
-        if (s == null) return null;
+        if (s == null)
+            return null;
         return s.length() <= max ? s : s.substring(0, max);
     }
 
@@ -200,10 +209,24 @@ public class ExtractionResultService {
         examSseService.sendToUser(uploaderId, "exam", payload);
     }
 
+    private void notifyReviewer(ExamUploadRequest upload, boolean isSuccess, String errorMessage) {
+        Long reviewerId = upload.getReviewedBy();
+        if (reviewerId == null) {
+            return;
+        }
+        adminAlertPublisher.publishUploadExtractionCompletedAlert(
+                upload.getId(),
+                upload.getTitle(),
+                reviewerId,
+                isSuccess,
+                errorMessage);
+    }
+
     public static class ParsedQuestion {
         public String content;
         public String explanation;
         public String difficulty;
+        public Double scoreWeight;
         public List<ParsedOption> options;
     }
 

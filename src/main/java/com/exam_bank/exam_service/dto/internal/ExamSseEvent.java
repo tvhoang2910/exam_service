@@ -25,6 +25,8 @@ public class ExamSseEvent {
     private Long examId;
     private String examTitle;
     private Long userId;
+    private Long uploadRequestId;
+    private Long extractedExamId;
     private int activeAttemptCount;
     private int totalSubmissionsToday;
     private long timestamp;
@@ -42,7 +44,7 @@ public class ExamSseEvent {
     }
 
     public static ExamSseEvent submitted(Long attemptId, Long examId, String examTitle,
-                                         Long userId, int activeAttemptCount, int totalSubmissionsToday) {
+            Long userId, int activeAttemptCount, int totalSubmissionsToday) {
         return ExamSseEvent.builder()
                 .eventType(EventType.EXAM_SUBMITTED)
                 .attemptId(attemptId)
@@ -56,7 +58,7 @@ public class ExamSseEvent {
     }
 
     public static ExamSseEvent attemptStarted(Long attemptId, Long examId,
-                                              int activeAttemptCount, int totalSubmissionsToday) {
+            int activeAttemptCount, int totalSubmissionsToday) {
         return ExamSseEvent.builder()
                 .eventType(EventType.ATTEMPT_STARTED)
                 .attemptId(attemptId)
@@ -68,7 +70,7 @@ public class ExamSseEvent {
     }
 
     public static ExamSseEvent attemptEnded(Long attemptId,
-                                            int activeAttemptCount, int totalSubmissionsToday) {
+            int activeAttemptCount, int totalSubmissionsToday) {
         return ExamSseEvent.builder()
                 .eventType(EventType.ATTEMPT_ENDED)
                 .attemptId(attemptId)
@@ -79,10 +81,18 @@ public class ExamSseEvent {
     }
 
     // Hàm báo kết quả AI của chúng ta
-    public static ExamSseEvent aiExtractionResult(Long examId, Long userId, boolean isSuccess, String message) {
+    public static ExamSseEvent aiExtractionResult(
+            Long examId,
+            Long uploadRequestId,
+            Long extractedExamId,
+            Long userId,
+            boolean isSuccess,
+            String message) {
         return ExamSseEvent.builder()
                 .eventType(isSuccess ? EventType.AI_EXTRACTION_SUCCESS : EventType.AI_EXTRACTION_FAILED)
                 .examId(examId)
+                .uploadRequestId(uploadRequestId)
+                .extractedExamId(extractedExamId)
                 .userId(userId)
                 .message(message)
                 .timestamp(System.currentTimeMillis())

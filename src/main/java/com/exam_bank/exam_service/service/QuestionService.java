@@ -1,6 +1,6 @@
 package com.exam_bank.exam_service.service;
 
-import com.exam_bank.exam_service.dto.CreateQuestionRequest;
+import com.exam_bank.exam_service.feature.upload.dto.CreateQuestionRequest;
 import com.exam_bank.exam_service.entity.OnlineExam;
 import com.exam_bank.exam_service.entity.Question;
 import com.exam_bank.exam_service.entity.QuestionOption;
@@ -41,7 +41,8 @@ public class QuestionService {
         question.setDifficulty(request.getDifficulty());
 
         // Vì Contributor tự tạo nên mặc định duyệt luôn (APPROVED)
-        // Lưu ý: Nếu entity Question của bạn đã có trường status (như hướng dẫn trước) thì mở comment dòng dưới:
+        // Lưu ý: Nếu entity Question của bạn đã có trường status (như hướng dẫn trước)
+        // thì mở comment dòng dưới:
         // question.setStatus(Question.QuestionStatus.APPROVED);
 
         question.setIsHidden(false);

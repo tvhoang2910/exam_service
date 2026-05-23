@@ -9,6 +9,7 @@ import com.exam_bank.exam_service.listener.ExtractionResultListener;
 import com.exam_bank.exam_service.repository.OnlineExamRepository;
 import com.exam_bank.exam_service.repository.QuestionOptionRepository;
 import com.exam_bank.exam_service.repository.QuestionRepository;
+import com.exam_bank.exam_service.service.AdminAlertPublisher;
 import com.exam_bank.exam_service.service.ExamSseService;
 import com.exam_bank.exam_service.service.ExtractionResultService;
 import org.junit.jupiter.api.DisplayName;
@@ -50,6 +51,7 @@ class UploadExtractFlowIntegrationTest {
                 QuestionRepository questionRepository,
                 QuestionOptionRepository questionOptionRepository,
                 ExamSseService examSseService,
+                AdminAlertPublisher adminAlertPublisher,
                 ObjectMapper objectMapper) {
             return new ExtractionResultService(
                     uploadRequestRepository,
@@ -57,6 +59,7 @@ class UploadExtractFlowIntegrationTest {
                     questionRepository,
                     questionOptionRepository,
                     examSseService,
+                    adminAlertPublisher,
                     objectMapper);
         }
 
@@ -83,6 +86,9 @@ class UploadExtractFlowIntegrationTest {
 
     @MockitoBean
     private ExamSseService examSseService;
+
+    @MockitoBean
+    private AdminAlertPublisher adminAlertPublisher;
 
     @MockitoBean
     private RabbitTemplate rabbitTemplate;
@@ -136,6 +142,46 @@ class UploadExtractFlowIntegrationTest {
 
         verify(questionRepository, times(2)).save(any());
         verify(questionOptionRepository, times(4)).save(any());
+        verify(examSseService).sendToUser(eq(42L), eq("exam"), any());
+    }
+
+    @Test
+    void handle_whenFailedExtractionEvent_thenMarkExtractFailedAndDoNotPersistQuestions() {
+        ExamUploadRequest upload = new ExamUploadRequest();
+        upload.setId(701L);
+        upload.setUploaderId(42L);
+        upload.setStatus(ExamUploadStatus.EXTRACTING);
+
+        OnlineExam exam = new OnlineExam();
+        exam.setId(801L);
+        exam.setTitle("Demo exam - failed");
+        exam.setTotalQuestions(0);
+
+        when(uploadRequestRepository.findById(701L)).thenReturn(Optional.of(upload));
+        when(examRepository.findById(801L)).thenReturn(Optional.of(exam));
+        when(uploadRequestRepository.save(any(ExamUploadRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(examRepository.save(any(OnlineExam.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        AiExtractionResultEvent event = AiExtractionResultEvent.builder()
+                .uploadRequestId(701L)
+                .examId(801L)
+                .uploadedByUserId("42")
+                .successFlag(false)
+                .aiJsonResult(null)
+                .errorMessage("AI extraction failed")
+                .timestamp(System.currentTimeMillis())
+                .build();
+
+        extractionResultListener.handle(event);
+
+        assertThat(upload.getStatus()).isEqualTo(ExamUploadStatus.EXTRACT_FAILED);
+        assertThat(exam.getTotalQuestions()).isEqualTo(0);
+
+        // No question/options should be persisted on failure
+        verify(questionRepository, times(0)).save(any());
+        verify(questionOptionRepository, times(0)).save(any());
+
+        // Still notify user via SSE (error contract)
         verify(examSseService).sendToUser(eq(42L), eq("exam"), any());
     }
 }

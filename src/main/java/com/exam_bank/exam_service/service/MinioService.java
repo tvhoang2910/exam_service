@@ -6,11 +6,15 @@ import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.GetObjectArgs;
+import io.minio.errors.ErrorResponseException;
 import io.minio.http.Method;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.InputStream;
 import java.util.UUID;
@@ -105,6 +109,24 @@ public class MinioService {
         } catch (Exception e) {
             log.error("Failed to generate presigned GET url for key {}: {}", objectKey, e.getMessage(), e);
             throw new RuntimeException("Failed to generate presigned GET url", e);
+        }
+    }
+
+    public InputStream getObject(String objectKey) {
+        try {
+            ensureBucketExists();
+            return minioClient.getObject(
+                    GetObjectArgs.builder()
+                            .bucket(minioProperties.getBucketName())
+                            .object(objectKey)
+                            .build());
+        } catch (Exception e) {
+            if (e instanceof ErrorResponseException minioError
+                    && "NoSuchKey".equals(minioError.errorResponse().code())) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Stored upload file not found");
+            }
+            log.error("Failed to fetch object {} from MinIO: {}", objectKey, e.getMessage(), e);
+            throw new RuntimeException("Failed to fetch object from MinIO", e);
         }
     }
 

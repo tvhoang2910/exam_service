@@ -6,6 +6,9 @@ import com.exam_bank.exam_service.feature.upload.service.ExamUploadService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -49,6 +52,23 @@ public class ExamUploadController {
     @GetMapping("/{id}")
     public ResponseEntity<ExamUploadResponse> detail(@PathVariable Long id) {
         return ResponseEntity.ok(uploadService.getDetail(id));
+    }
+
+    @GetMapping("/{id}/pages/{pageIndex}")
+    public ResponseEntity<InputStreamResource> page(
+            @PathVariable Long id,
+            @PathVariable Integer pageIndex) {
+        ExamUploadService.UploadPageStream uploadPage = uploadService.getUploadPageStream(id, pageIndex);
+        MediaType mediaType = MediaType.APPLICATION_OCTET_STREAM;
+        if (uploadPage.contentType() != null && !uploadPage.contentType().isBlank()) {
+            mediaType = MediaType.parseMediaType(uploadPage.contentType());
+        }
+        String fileName = uploadPage.objectKey().substring(uploadPage.objectKey().lastIndexOf('/') + 1);
+
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + fileName + "\"")
+                .body(new InputStreamResource(uploadPage.inputStream()));
     }
 
     @GetMapping("/{id}/history")

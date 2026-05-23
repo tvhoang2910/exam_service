@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
@@ -57,6 +58,9 @@ import static org.mockito.Mockito.when;
 @AutoConfigureTestRestTemplate
 @DisplayName("ExamAttemptController Integration Tests")
 class ExamAttemptControllerIntegrationTest {
+
+        private static final ParameterizedTypeReference<Map<String, Object>> MAP_OBJECT_TYPE = new ParameterizedTypeReference<>() {
+        };
 
         @Autowired
         private TestRestTemplate restTemplate;
@@ -223,8 +227,8 @@ class ExamAttemptControllerIntegrationTest {
                 StartAttemptRequest request = new StartAttemptRequest();
                 request.setExamId(1L);
 
-                ResponseEntity<Map> response = restTemplate.postForEntity(
-                                BASE + "/attempts", request, Map.class);
+                ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                                BASE + "/attempts", HttpMethod.POST, new HttpEntity<>(request), MAP_OBJECT_TYPE);
 
                 assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
@@ -238,9 +242,9 @@ class ExamAttemptControllerIntegrationTest {
                 request.setExamId(999999999L);
 
                 HttpHeaders headers = bearerJsonHeaders(userToken);
-                ResponseEntity<Map> response = restTemplate.exchange(
+                ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
                                 BASE + "/attempts", HttpMethod.POST,
-                                new HttpEntity<>(request, headers), Map.class);
+                                new HttpEntity<>(request, headers), MAP_OBJECT_TYPE);
 
                 assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         }
@@ -373,9 +377,9 @@ class ExamAttemptControllerIntegrationTest {
                                 AttemptResultResponse.class);
 
                 // Other user tries to access
-                ResponseEntity<Map> response = restTemplate.exchange(
+                ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
                                 BASE + "/attempts/" + attemptId + "/result", HttpMethod.GET,
-                                new HttpEntity<>(bearerHeaders(otherToken)), Map.class);
+                                new HttpEntity<>(bearerHeaders(otherToken)), MAP_OBJECT_TYPE);
 
                 assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         }

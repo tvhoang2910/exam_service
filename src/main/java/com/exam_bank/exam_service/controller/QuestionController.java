@@ -1,6 +1,6 @@
 package com.exam_bank.exam_service.controller;
 
-import com.exam_bank.exam_service.dto.CreateQuestionRequest;
+import com.exam_bank.exam_service.feature.upload.dto.CreateQuestionRequest;
 import com.exam_bank.exam_service.service.AuthenticatedUserService;
 import com.exam_bank.exam_service.service.QuestionService;
 import jakarta.validation.Valid;

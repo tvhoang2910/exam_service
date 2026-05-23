@@ -16,7 +16,6 @@ import com.exam_bank.exam_service.feature.upload.dto.ExamUploadPageResponse;
 import com.exam_bank.exam_service.feature.upload.dto.ExamUploadResponse;
 import com.exam_bank.exam_service.feature.upload.entity.ExamUploadRequest;
 import com.exam_bank.exam_service.feature.upload.entity.ExamUploadStatus;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,8 +23,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 
 import java.util.List;
 import java.util.Optional;
@@ -126,7 +123,6 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: list pending queue returns page")
     void smoke_listPendingQueue_returnsPage() {
-        Pageable pageable = PageRequest.of(0, 10);
         when(uploadRequestRepository.findByStatus(any(), any()))
                 .thenReturn(new PageImpl<>(List.of()));
 

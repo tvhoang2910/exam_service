@@ -66,6 +66,31 @@
             "description": "A description for 'exam.events.file-uploaded-routing-key'"
         },
         {
+            "name": "exam.events.ai-extracted-routing-key",
+            "type": "java.lang.String",
+            "description": "Routing key for AI extraction events forwarded to search service."
+        },
+        {
+            "name": "exam.extraction.result.queue",
+            "type": "java.lang.String",
+            "description": "Queue receiving extraction result events."
+        },
+        {
+            "name": "exam.events.sync-routing-key",
+            "type": "java.lang.String",
+            "description": "Routing key used for exam synchronization events."
+        },
+        {
+            "name": "notification.exchange",
+            "type": "java.lang.String",
+            "description": "Notification exchange used by exam service to publish admin alerts."
+        },
+        {
+            "name": "notification.admin-alert-routing-key",
+            "type": "java.lang.String",
+            "description": "Routing key used for admin alert notifications."
+        },
+        {
             "name": "minio.bucket-name",
             "type": "java.lang.String",
             "description": "A description for 'minio.bucket-name'"

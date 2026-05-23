@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -53,6 +54,9 @@ class ExtractionResultServiceTest {
     @Mock
     private ExamSseService examSseService;
 
+    @Mock
+    private AdminAlertPublisher adminAlertPublisher;
+
     private ExtractionResultService service;
 
     @BeforeEach
@@ -63,12 +67,14 @@ class ExtractionResultServiceTest {
                 questionRepository,
                 questionOptionRepository,
                 examSseService,
+                adminAlertPublisher,
                 new ObjectMapper());
     }
 
     @Test
     void processExtractionResult_whenSuccessJsonHasThreeQuestions_thenPersistAndMarkExtracted() {
         ExamUploadRequest upload = upload(10L, 77L, ExamUploadStatus.EXTRACTING);
+        upload.setReviewedBy(99L);
         OnlineExam exam = exam(999L);
 
         when(uploadRequestRepository.findById(10L)).thenReturn(Optional.of(upload));
@@ -110,6 +116,12 @@ class ExtractionResultServiceTest {
 
         verify(questionRepository, times(3)).save(any(Question.class));
         verify(questionOptionRepository, times(6)).save(any(QuestionOption.class));
+        verify(adminAlertPublisher).publishUploadExtractionCompletedAlert(
+                eq(10L),
+                eq("Upload 10"),
+                eq(99L),
+                eq(true),
+                isNull());
 
         ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
         verify(examSseService).sendToUser(eq(77L), eq("exam"), payloadCaptor.capture());
@@ -156,6 +168,74 @@ class ExtractionResultServiceTest {
         assertThat(upload.getStatus()).isEqualTo(ExamUploadStatus.EXTRACTED);
         assertThat(exam.getTotalQuestions()).isEqualTo(1);
         verify(questionRepository).save(any(Question.class));
+    }
+
+    @Test
+    void processExtractionResult_whenJsonHasLatexBackslash_thenNormalizeAndPersist() {
+        ExamUploadRequest upload = upload(16L, 77L, ExamUploadStatus.EXTRACTING);
+        OnlineExam exam = exam(1006L);
+
+        when(uploadRequestRepository.findById(16L)).thenReturn(Optional.of(upload));
+        when(examRepository.findById(1006L)).thenReturn(Optional.of(exam));
+        when(uploadRequestRepository.save(any(ExamUploadRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(examRepository.save(any(OnlineExam.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(questionRepository.save(any(Question.class))).thenAnswer(inv -> {
+            Question saved = inv.getArgument(0);
+            saved.setId(1L);
+            return saved;
+        });
+
+        String aiJson = "[{\"content\":\"Góc " + '\\' + "alpha bằng bao nhiêu?\","
+                + "\"explanation\":\"\",\"difficulty\":\"MEDIUM\","
+                + "\"options\":[{\"content\":\"A\",\"isCorrect\":true}]}]";
+
+        AiExtractionResultEvent event = AiExtractionResultEvent.builder()
+                .uploadRequestId(16L)
+                .examId(1006L)
+                .successFlag(true)
+                .aiJsonResult(aiJson)
+                .build();
+
+        service.processExtractionResult(event);
+
+        ArgumentCaptor<Question> questionCaptor = ArgumentCaptor.forClass(Question.class);
+        verify(questionRepository).save(questionCaptor.capture());
+        assertThat(questionCaptor.getValue().getContent()).contains("\\alpha");
+        assertThat(upload.getStatus()).isEqualTo(ExamUploadStatus.EXTRACTED);
+    }
+
+    @Test
+    void processExtractionResult_whenJsonHasInvalidEscape_thenNormalizeAndPersist() {
+        ExamUploadRequest upload = upload(20L, 77L, ExamUploadStatus.EXTRACTING);
+        OnlineExam exam = exam(2000L);
+
+        when(uploadRequestRepository.findById(20L)).thenReturn(Optional.of(upload));
+        when(examRepository.findById(2000L)).thenReturn(Optional.of(exam));
+        when(uploadRequestRepository.save(any(ExamUploadRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(examRepository.save(any(OnlineExam.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(questionRepository.save(any(Question.class))).thenAnswer(inv -> {
+            Question saved = inv.getArgument(0);
+            saved.setId(1L);
+            return saved;
+        });
+        when(questionOptionRepository.save(any(QuestionOption.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        String aiJson = "[{\"content\":\"Bad " + '\\'
+                + "c escape\",\"explanation\":\"\",\"difficulty\":\"MEDIUM\",\"options\":[{\"content\":\"A\",\"isCorrect\":true}]}]";
+
+        AiExtractionResultEvent event = AiExtractionResultEvent.builder()
+                .uploadRequestId(20L)
+                .examId(2000L)
+                .successFlag(true)
+                .aiJsonResult(aiJson)
+                .build();
+
+        service.processExtractionResult(event);
+
+        ArgumentCaptor<Question> questionCaptor = ArgumentCaptor.forClass(Question.class);
+        verify(questionRepository).save(questionCaptor.capture());
+        assertThat(questionCaptor.getValue().getContent()).contains("\\c");
+        assertThat(upload.getStatus()).isEqualTo(ExamUploadStatus.EXTRACTED);
     }
 
     @Test

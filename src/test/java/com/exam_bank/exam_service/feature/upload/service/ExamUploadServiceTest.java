@@ -232,25 +232,32 @@ class ExamUploadServiceTest {
     }
 
     @Test
-    @DisplayName("completeUpload by ADMIN self-upload switches to SELF_UPLOADED and publishes audit")
+    @DisplayName("completeUpload by ADMIN self-upload starts extraction and publishes audit")
     void completeUpload_byAdminSelf_setsSelfUploadedStatus_auditNotification() {
         authenticateAs("ADMIN");
         when(authenticatedUserService.getCurrentUserId()).thenReturn(7L);
         ExamUploadRequest existing = buildUpload(200L, 7L, "ADMIN", ExamUploadStatus.PENDING_APPROVAL);
+        OnlineExam savedExam = new OnlineExam();
+        savedExam.setId(9000L);
         when(uploadRequestRepository.findById(200L)).thenReturn(java.util.Optional.of(existing));
         when(uploadRequestRepository.save(any(ExamUploadRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(onlineExamRepository.save(any(OnlineExam.class))).thenReturn(savedExam);
 
         ExamUploadResponse resp = service.completeUpload(200L, new CompleteUploadRequest(null));
 
-        assertThat(resp.getStatus()).isEqualTo(ExamUploadStatus.SELF_UPLOADED);
+        assertThat(resp.getStatus()).isEqualTo(ExamUploadStatus.EXTRACTING);
+        assertThat(resp.getExtractedExamId()).isEqualTo(9000L);
 
         ArgumentCaptor<ExamUploadHistory> historyCaptor = ArgumentCaptor.forClass(ExamUploadHistory.class);
-        verify(historyRepository).save(historyCaptor.capture());
-        assertThat(historyCaptor.getValue().getAction()).isEqualTo("SELF_UPLOADED");
-        assertThat(historyCaptor.getValue().getNewStatus()).isEqualTo(ExamUploadStatus.SELF_UPLOADED);
+        verify(historyRepository, times(2)).save(historyCaptor.capture());
+        assertThat(historyCaptor.getAllValues().get(0).getAction()).isEqualTo("SELF_UPLOADED");
+        assertThat(historyCaptor.getAllValues().get(0).getNewStatus()).isEqualTo(ExamUploadStatus.SELF_UPLOADED);
+        assertThat(historyCaptor.getAllValues().get(1).getAction()).isEqualTo("EXTRACTION_STARTED");
+        assertThat(historyCaptor.getAllValues().get(1).getNewStatus()).isEqualTo(ExamUploadStatus.EXTRACTING);
 
         verify(adminAlertPublisher).publishSelfUploadAudit(eq(200L), eq("Mock title"), eq(7L), eq("ADMIN"));
         verify(adminAlertPublisher, never()).publishUploadSubmittedAlert(anyLong(), anyString(), anyLong(), any());
+        verify(rabbitMQEventPublisher).publishFileUploadedEvent(any(ExamSourceUploadedEvent.class));
     }
 
     @Test
@@ -436,18 +443,18 @@ class ExamUploadServiceTest {
     }
 
     @Test
-    @DisplayName("listPendingQueue returns only PENDING_APPROVAL entries")
+    @DisplayName("listPendingQueue returns only submitted PENDING_APPROVAL entries")
     void listPendingQueue_returnsOnlyPendingStatus() {
         ExamUploadRequest e = buildUpload(11L, 42L, "USER", ExamUploadStatus.PENDING_APPROVAL);
         Page<ExamUploadRequest> page = new PageImpl<>(List.of(e));
-        when(uploadRequestRepository.findByStatus(eq(ExamUploadStatus.PENDING_APPROVAL), any(Pageable.class)))
+        when(uploadRequestRepository.findSubmittedByStatus(eq(ExamUploadStatus.PENDING_APPROVAL), any(Pageable.class)))
                 .thenReturn(page);
 
         ExamUploadPageResponse resp = service.listPendingQueue(0, 20);
 
         assertThat(resp.getContent()).hasSize(1);
         assertThat(resp.getContent().get(0).getStatus()).isEqualTo(ExamUploadStatus.PENDING_APPROVAL);
-        verify(uploadRequestRepository).findByStatus(eq(ExamUploadStatus.PENDING_APPROVAL), any(Pageable.class));
+        verify(uploadRequestRepository).findSubmittedByStatus(eq(ExamUploadStatus.PENDING_APPROVAL), any(Pageable.class));
         verifyNoInteractions(authenticatedUserService);
     }
 }

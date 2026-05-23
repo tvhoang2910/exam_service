@@ -10,6 +10,7 @@ import com.exam_bank.exam_service.entity.*;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportHistoryRepository;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportRepository;
 import com.exam_bank.exam_service.repository.*;
+import com.exam_bank.exam_service.util.AiJsonNormalizer;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -522,7 +523,8 @@ public class ExamManagementService {
         try {
             // 2. Dịch chuỗi JSON thành List<AiQuestionDto>
             ObjectMapper mapper = new ObjectMapper();
-            List<AiQuestionDto> parsedQuestions = mapper.readValue(jsonResult, new TypeReference<List<AiQuestionDto>>() {
+            String normalizedJson = AiJsonNormalizer.normalizeQuestionArray(jsonResult);
+            List<AiQuestionDto> parsedQuestions = mapper.readValue(normalizedJson, new TypeReference<List<AiQuestionDto>>() {
             });
 
             List<Question> questionsToSave = new ArrayList<>();
@@ -535,7 +537,7 @@ public class ExamManagementService {
                 question.setContent(dto.getContent());
                 question.setExplanation(dto.getExplanation());
                 question.setScoreWeight(dto.getScoreWeight() != null ? dto.getScoreWeight() : 1.0);
-                question.setDifficulty(Question.Difficulty.MEDIUM); // Mặc định là Trung bình
+                question.setDifficulty(parseAiDifficulty(dto.getDifficulty()));
                 question.setIsHidden(false);
                 questionsToSave.add(question);
 
@@ -563,6 +565,17 @@ public class ExamManagementService {
         } catch (Exception e) {
             log.error("Lỗi khi parse và lưu JSON từ AI cho Exam ID {}: {}", examId, e.getMessage());
             throw new RuntimeException("Không thể lưu dữ liệu AI vào Database", e);
+        }
+    }
+
+    private Question.Difficulty parseAiDifficulty(String rawDifficulty) {
+        if (rawDifficulty == null || rawDifficulty.isBlank()) {
+            return Question.Difficulty.MEDIUM;
+        }
+        try {
+            return Question.Difficulty.valueOf(rawDifficulty.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            return Question.Difficulty.MEDIUM;
         }
     }
 

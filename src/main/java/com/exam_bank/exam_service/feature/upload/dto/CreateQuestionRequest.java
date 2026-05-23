@@ -1,4 +1,4 @@
-package com.exam_bank.exam_service.dto;
+package com.exam_bank.exam_service.feature.upload.dto;
 
 import com.exam_bank.exam_service.entity.Question.Difficulty;
 import jakarta.validation.constraints.NotBlank;
