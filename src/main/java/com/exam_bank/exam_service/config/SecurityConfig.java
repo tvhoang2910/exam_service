@@ -6,11 +6,16 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -35,6 +40,7 @@ import java.util.List;
 
 @Configuration
 @EnableConfigurationProperties(AuthJwtProperties.class)
+@EnableMethodSecurity
 public class SecurityConfig {
 
         private final AuthJwtProperties authJwtProperties;
@@ -46,7 +52,7 @@ public class SecurityConfig {
         }
 
         @Bean
-        public SecurityFilterChain securityFilterChain(HttpSecurity http) {
+        public SecurityFilterChain securityFilterChain(HttpSecurity http, OncePerRequestFilter internalTokenFilter) {
                 http
                                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
 
@@ -57,17 +63,36 @@ public class SecurityConfig {
                                                 .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                                                 .requestMatchers("/exams/public", "/exams/public/**").permitAll()
                                                 .requestMatchers("/sse/**").permitAll()
+                                                // internal endpoints require an internal token or valid JWT with INTERNAL role
+                                                .requestMatchers("/api/v1/internal/**", "/internal/**").hasRole("INTERNAL")
+                                                .requestMatchers(HttpMethod.PUT, "/attempts/*/answers/*/grade")
+                                                .hasRole("CONTRIBUTOR")
+                                                .requestMatchers("/essay-submissions", "/essay-submissions/**")
+                                                .hasRole("CONTRIBUTOR")
                                                 .requestMatchers("/attempts", "/attempts/**", "/users/me/attempts")
                                                 .hasAnyRole("USER", "ADMIN", "CONTRIBUTOR")
                                                 .requestMatchers(HttpMethod.GET, "/tags", "/tags/**").authenticated()
                                                 .requestMatchers("/tags").hasAnyRole("ADMIN", "CONTRIBUTOR")
+                                                .requestMatchers(HttpMethod.PATCH, "/exams/*/status")
+                                                .hasAnyRole("ADMIN", "CONTRIBUTOR")
                                                 .requestMatchers("/exams/manage", "/exams/manage/**")
-                                                .hasAnyRole("ADMIN", "CONTRIBUTOR")
+                                                .hasRole("CONTRIBUTOR")
+                                                .requestMatchers(HttpMethod.POST, "/exams", "/exams/upload-source")
+                                                .hasRole("CONTRIBUTOR")
+                                                .requestMatchers(HttpMethod.PUT, "/exams/*")
+                                                .hasRole("CONTRIBUTOR")
+                                                .requestMatchers(HttpMethod.DELETE, "/exams/*")
+                                                .hasRole("CONTRIBUTOR")
                                                 .requestMatchers("/exams/**").hasAnyRole("ADMIN", "CONTRIBUTOR")
-                                                .requestMatchers("/admin/uploads", "/admin/uploads/**")
-                                                .hasAnyRole("ADMIN", "CONTRIBUTOR")
+                                                .requestMatchers(HttpMethod.POST, "/questions")
+                                                .hasRole("CONTRIBUTOR")
+                                                .requestMatchers(HttpMethod.GET, "/uploads/pending").hasRole("CONTRIBUTOR")
+                                                .requestMatchers(HttpMethod.POST, "/uploads/*/approve", "/uploads/*/reject")
+                                                .hasRole("CONTRIBUTOR")
                                                 .requestMatchers("/uploads", "/uploads/**")
-                                                .hasAnyRole("USER", "ADMIN", "CONTRIBUTOR")
+                                                .hasAnyRole("USER", "CONTRIBUTOR")
+                                                .requestMatchers(HttpMethod.PUT, "/admin/reports/questions/*/resolve")
+                                                .hasRole("ADMIN")
                                                 .requestMatchers("/admin/reports", "/admin/reports/**")
                                                 .hasAnyRole("ADMIN", "CONTRIBUTOR")
                                                 .requestMatchers("/admin/**").hasRole("ADMIN")
@@ -77,7 +102,35 @@ public class SecurityConfig {
                                                 .decoder(jwtDecoder())
                                                 .jwtAuthenticationConverter(jwtAuthenticationConverter())));
 
+                // filter that allows service-to-service calls authenticated by X-Internal-Token
+                http.addFilterBefore(internalTokenFilter, UsernamePasswordAuthenticationFilter.class);
+
                 return http.build();
+        }
+
+        @Bean
+        public OncePerRequestFilter internalTokenFilter() {
+                String expected = System.getenv("NOTIFICATION_INTERNAL_TOKEN");
+                return new OncePerRequestFilter() {
+                        @Override
+                        protected void doFilterInternal(jakarta.servlet.http.HttpServletRequest request,
+                                                        jakarta.servlet.http.HttpServletResponse response,
+                                                        jakarta.servlet.FilterChain filterChain)
+                                        throws java.io.IOException, jakarta.servlet.ServletException {
+                                String path = request.getRequestURI();
+                                if ((path.startsWith("/internal/") || path.startsWith("/api/v1/internal/"))
+                                                && expected != null && !expected.isBlank()) {
+                                        String header = request.getHeader("X-Internal-Token");
+                                        if (expected.equals(header)) {
+                                                UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                                                                "internal", null,
+                                                                List.of(new SimpleGrantedAuthority("ROLE_INTERNAL")));
+                                                SecurityContextHolder.getContext().setAuthentication(auth);
+                                        }
+                                }
+                                filterChain.doFilter(request, response);
+                        }
+                };
         }
 
         @Bean

@@ -32,7 +32,7 @@ public interface ContentAnalyticsRepository extends JpaRepository<QuestionReview
                     ea.user_id,
                     NTILE(4) OVER (PARTITION BY ea.exam_id ORDER BY ea.score_percent) AS quartile
                 FROM exam_attempts ea
-                WHERE ea.status IN ('SUBMITTED', 'AUTO_SUBMITTED')
+                WHERE ea.status IN ('SUBMITTED', 'AUTO_SUBMITTED', 'PARTIALLY_GRADED', 'GRADED')
             )
             SELECT
                 qre.item_id                           AS questionId,
@@ -71,7 +71,7 @@ public interface ContentAnalyticsRepository extends JpaRepository<QuestionReview
                       / NULLIF(COUNT(*), 0) * 100, 2) AS passRate
             FROM exam_attempts ea
             WHERE ea.exam_id = :examId
-              AND ea.status IN ('SUBMITTED', 'AUTO_SUBMITTED')
+              AND ea.status IN ('SUBMITTED', 'AUTO_SUBMITTED', 'PARTIALLY_GRADED', 'GRADED')
             GROUP BY ea.exam_id
             """, nativeQuery = true)
     ExamStatProjection findExamStats(@Param("examId") Long examId);

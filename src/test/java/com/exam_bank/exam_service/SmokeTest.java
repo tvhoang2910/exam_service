@@ -123,7 +123,8 @@ class SmokeTest {
     @Test
     @DisplayName("Smoke: list pending queue returns page")
     void smoke_listPendingQueue_returnsPage() {
-        when(uploadRequestRepository.findByStatus(any(), any()))
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(555L);
+        when(uploadRequestRepository.findPendingForReviewer(eq(ExamUploadStatus.PENDING_APPROVAL), eq(555L), any()))
                 .thenReturn(new PageImpl<>(List.of()));
 
         ExamUploadPageResponse page = uploadService.listPendingQueue(0, 10);

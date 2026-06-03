@@ -77,11 +77,11 @@ public final class AiJsonNormalizer {
                         continue;
                     }
 
-                    // invalid escape like \\a or \\c -> escape the backslash itself by writing two
-                    // backslashes
+                    // invalid escape like \a or \c -> preserve the backslash as a literal character
+                    // by escaping it (emit "\\") so JSON parsing succeeds while keeping content intact.
+                    // Do not consume 'next' here; let it be processed in following iteration as normal char.
                     out.append('\\');
                     out.append('\\');
-                    // do not consume 'next' here; let it be processed in following iteration
                     continue;
                 } else {
                     // trailing backslash at end of string -> escape it

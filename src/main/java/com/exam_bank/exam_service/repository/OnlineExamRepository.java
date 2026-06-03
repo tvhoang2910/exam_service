@@ -14,6 +14,9 @@ public interface OnlineExamRepository extends JpaRepository<OnlineExam, Long> {
     List<OnlineExam> findAllByOrderByCreatedAtDesc();
 
     @EntityGraph(attributePaths = "tags")
+    List<OnlineExam> findByCreatedByOrderByCreatedAtDesc(String createdBy);
+
+    @EntityGraph(attributePaths = "tags")
     List<OnlineExam> findByStatusOrderByCreatedAtDesc(OnlineExamStatus status);
 
     @EntityGraph(attributePaths = "tags")

@@ -1,7 +1,9 @@
 package com.exam_bank.exam_service.dto;
 
+import com.exam_bank.exam_service.entity.AnswerStatus;
 import com.exam_bank.exam_service.entity.ExamAttemptStatus;
 import com.exam_bank.exam_service.entity.Question;
+import com.exam_bank.exam_service.entity.QuestionType;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -29,8 +31,12 @@ public class AttemptResultResponse {
     @Getter
     @Setter
     public static class QuestionResult {
+        private Long answerId;
         private Long questionId;
         private String content;
+        private QuestionType questionType;
+        private AnswerStatus answerStatus;
+        private Double score;
         private Double maxScore;
         private Double earnedScore;
         private Boolean correct;
@@ -39,6 +45,12 @@ public class AttemptResultResponse {
         private List<OptionResult> options = new ArrayList<>();
         private List<Long> selectedOptionIds = new ArrayList<>();
         private List<Long> correctOptionIds = new ArrayList<>();
+        private String essayAnswer;
+        private String textAnswer;
+        private String feedback;
+        private String teacherFeedback;
+        private String sampleAnswer;
+        private String gradingGuide;
         private Long responseTimeMs;
         private Integer answerChangeCount;
     }

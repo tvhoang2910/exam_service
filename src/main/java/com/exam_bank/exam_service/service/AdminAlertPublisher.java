@@ -30,8 +30,8 @@ public class AdminAlertPublisher {
                                 "EXAM_SUBMITTED",
                                 "Bài thi mới được nộp",
                                 userFullName + " — " + examTitle,
-                                List.of("ADMIN", "CONTRIBUTOR"),
-                                "/admin/exams",
+                                List.of("CONTRIBUTOR"),
+                                "/contributor/exams",
                                 Map.of("attemptId", attemptId, "examId", examId));
                 rabbitTemplate.convertAndSend(notificationExchange, adminAlertRoutingKey, message);
                 log.info("Published EXAM_SUBMITTED admin alert: attemptId={}, examId={}", attemptId, examId);
@@ -125,8 +125,8 @@ public class AdminAlertPublisher {
                                         "EXAM_UPLOAD_SUBMITTED",
                                         "Đề thi mới chờ duyệt",
                                         displayName + " đã gửi đề: " + title,
-                                        List.of("ADMIN", "CONTRIBUTOR"),
-                                        "/admin/uploads",
+                                        List.of("CONTRIBUTOR"),
+                                        "/contributor/upload-queue",
                                         metadata);
                         rabbitTemplate.convertAndSend(notificationExchange, adminAlertRoutingKey, message);
                         log.info("Published EXAM_UPLOAD_SUBMITTED alert: uploadId={}, uploaderId={}", uploadId,
@@ -199,7 +199,7 @@ public class AdminAlertPublisher {
                                         "Đề thi được tự đăng",
                                         uploaderRole + " #" + uploaderId + " đã tự đăng đề: " + title,
                                         List.of("ADMIN"),
-                                        "/admin/uploads",
+                                        "/admin/dashboard",
                                         metadata);
                         rabbitTemplate.convertAndSend(notificationExchange, adminAlertRoutingKey, message);
                         log.info("Published EXAM_SELF_UPLOADED audit: uploadId={}, uploaderId={}", uploadId,
@@ -246,7 +246,7 @@ public class AdminAlertPublisher {
                                         headline,
                                         body,
                                         List.of(),
-                                        "/admin/upload-queue",
+                                        "/contributor/upload-queue",
                                         metadata);
                         rabbitTemplate.convertAndSend(notificationExchange, adminAlertRoutingKey, message);
                         log.info("Published {} alert: uploadId={}, reviewerId={}, success={}", type, uploadId,

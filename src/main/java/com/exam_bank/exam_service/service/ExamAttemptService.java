@@ -1,6 +1,7 @@
 package com.exam_bank.exam_service.service;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
@@ -24,20 +25,25 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.exam_bank.exam_service.dto.AttemptResultResponse;
 import com.exam_bank.exam_service.dto.AttemptSummaryResponse;
+import com.exam_bank.exam_service.dto.EssaySubmissionDetailResponse;
+import com.exam_bank.exam_service.dto.EssaySubmissionSummaryResponse;
 import com.exam_bank.exam_service.dto.ExamResponse;
 import com.exam_bank.exam_service.dto.ExamSubmittedEvent;
+import com.exam_bank.exam_service.dto.GradeAnswerRequest;
 import com.exam_bank.exam_service.dto.ExamSubmittedEvent.QuestionAnswered;
 import com.exam_bank.exam_service.dto.ExamSubmittedEvent.TagInfo;
 import com.exam_bank.exam_service.dto.SaveAttemptAnswerRequest;
 import com.exam_bank.exam_service.dto.SaveAttemptAnswersBatchRequest;
 import com.exam_bank.exam_service.dto.StartAttemptRequest;
 import com.exam_bank.exam_service.dto.StartAttemptResponse;
+import com.exam_bank.exam_service.entity.AnswerStatus;
 import com.exam_bank.exam_service.entity.ExamAttempt;
 import com.exam_bank.exam_service.entity.ExamAttemptAnswer;
 import com.exam_bank.exam_service.entity.ExamAttemptStatus;
 import com.exam_bank.exam_service.entity.OnlineExam;
 import com.exam_bank.exam_service.entity.OnlineExamStatus;
 import com.exam_bank.exam_service.entity.Question;
+import com.exam_bank.exam_service.entity.QuestionType;
 import com.exam_bank.exam_service.entity.QuestionReviewEvent;
 import com.exam_bank.exam_service.repository.ExamAttemptAnswerRepository;
 import com.exam_bank.exam_service.repository.ExamAttemptRepository;
@@ -124,7 +130,7 @@ public class ExamAttemptService {
 
         int maxAttempts = exam.getMaxAttempts() == null ? 100 : exam.getMaxAttempts();
         long submittedCount = examAttemptRepository.countByExamIdAndUserIdAndStatusIn(
-                exam.getId(), userId, List.of(ExamAttemptStatus.SUBMITTED, ExamAttemptStatus.AUTO_SUBMITTED));
+                exam.getId(), userId, completedAttemptStatuses());
         if (submittedCount >= maxAttempts) {
             log.warn("Start attempt rejected: exam {} user {} submittedCount={} maxAttempts={}",
                     exam.getId(), userId, submittedCount, maxAttempts);
@@ -199,6 +205,9 @@ public class ExamAttemptService {
 
         for (Long questionId : questionIds) {
             SaveAttemptAnswerRequest request = latestRequestByQuestionId.get(questionId);
+            ExamFlowCacheService.QuestionSnapshot questionSnapshot = findQuestionSnapshot(questionBank, questionId)
+                    .orElseThrow(
+                            () -> new ResponseStatusException(FORBIDDEN, "Question does not belong to this attempt"));
             ExamAttemptAnswer answer = existingAnswerByQuestionId.get(questionId);
 
             if (answer == null) {
@@ -207,7 +216,13 @@ public class ExamAttemptService {
                 answer.setQuestion(questionRepository.getReferenceById(questionId));
             }
 
-            answer.setSelectedOptionIds(encodeOptionIds(request.getSelectedOptionIds()));
+            if (questionSnapshot.questionType() == QuestionType.ESSAY) {
+                answer.setSelectedOptionIds("");
+                answer.setEssayAnswer(normalizeTextAnswer(resolveEssayAnswer(request)));
+            } else {
+                answer.setSelectedOptionIds(encodeOptionIds(resolveSelectedOptionIds(request)));
+                answer.setEssayAnswer(null);
+            }
             answer.setResponseTimeMs(request.getResponseTimeMs());
             answer.setAnswerChangeCount(request.getAnswerChangeCount() == null ? 0 : request.getAnswerChangeCount());
             answersToSave.add(answer);
@@ -245,7 +260,7 @@ public class ExamAttemptService {
     public List<AttemptSummaryResponse> getAttemptHistory(Long userId) {
         List<ExamAttempt> attempts = examAttemptRepository.findSubmittedHistoryByUserId(
                 userId,
-                List.of(ExamAttemptStatus.SUBMITTED, ExamAttemptStatus.AUTO_SUBMITTED));
+                completedAttemptStatuses());
         return attempts.stream().map(this::toAttemptSummary).toList();
     }
 
@@ -284,15 +299,11 @@ public class ExamAttemptService {
 
         double scoreRaw = 0.0;
         double scoreMax = 0.0;
+        boolean hasPendingEssay = false;
 
         for (ExamFlowCacheService.QuestionSnapshot question : questions) {
             ExamAttemptAnswer answer = answerByQuestionId.get(question.questionId());
-            Set<Long> selectedIds = decodeOptionIds(answer != null ? answer.getSelectedOptionIds() : null);
-            Set<Long> correctIds = correctOptionIdsByQuestionId.getOrDefault(question.questionId(), Set.of());
-
             double maxScore = question.scoreWeight() == null ? 1.0 : question.scoreWeight();
-            boolean isCorrect = !selectedIds.isEmpty() && selectedIds.equals(correctIds);
-            double earnedScore = isCorrect ? maxScore : 0.0;
 
             if (answer == null) {
                 answer = new ExamAttemptAnswer();
@@ -303,9 +314,31 @@ public class ExamAttemptService {
                 answerByQuestionId.put(question.questionId(), answer);
             }
 
+            if (question.questionType() == QuestionType.ESSAY) {
+                hasPendingEssay = true;
+                answer.setSelectedOptionIds("");
+                answer.setEssayAnswer(normalizeTextAnswer(answer.getEssayAnswer()));
+                answer.setIsCorrect(false);
+                answer.setMaxScore(maxScore);
+                answer.setEarnedScore(0.0);
+                answer.setStatus(AnswerStatus.PENDING_REVIEW);
+                examAttemptAnswerRepository.save(answer);
+
+                scoreMax += maxScore;
+                continue;
+            }
+
+            Set<Long> selectedIds = decodeOptionIds(answer.getSelectedOptionIds());
+            Set<Long> correctIds = correctOptionIdsByQuestionId.getOrDefault(question.questionId(), Set.of());
+            boolean isCorrect = !selectedIds.isEmpty() && selectedIds.equals(correctIds);
+            double earnedScore = isCorrect ? maxScore : 0.0;
+
+            answer.setEssayAnswer(null);
+            answer.setFeedback(null);
             answer.setIsCorrect(isCorrect);
             answer.setMaxScore(maxScore);
             answer.setEarnedScore(earnedScore);
+            answer.setStatus(AnswerStatus.AUTO_GRADED);
             examAttemptAnswerRepository.save(answer);
 
             scoreRaw += earnedScore;
@@ -318,7 +351,7 @@ public class ExamAttemptService {
         // Gọi hàm dùng chung để tính điểm
         updateAttemptScores(attempt, scoreRaw, scoreMax);
 
-        attempt.setStatus(autoSubmitted ? ExamAttemptStatus.AUTO_SUBMITTED : ExamAttemptStatus.SUBMITTED);
+        attempt.setStatus(hasPendingEssay ? ExamAttemptStatus.PARTIALLY_GRADED : ExamAttemptStatus.GRADED);
         examAttemptRepository.save(attempt);
 
         createReviewEvents(attempt, questions, answerByQuestionId);
@@ -336,8 +369,8 @@ public class ExamAttemptService {
     }
 
     private void publishExamSubmittedEvent(ExamAttempt attempt,
-                                           ExamFlowCacheService.QuestionBankSnapshot questionBank,
-                                           Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+            ExamFlowCacheService.QuestionBankSnapshot questionBank,
+            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         ExamSubmittedEvent event = new ExamSubmittedEvent();
         event.setAttemptId(attempt.getId());
         event.setUserId(attempt.getUserId());
@@ -351,6 +384,9 @@ public class ExamAttemptService {
 
         List<QuestionAnswered> questionEvents = new ArrayList<>();
         for (ExamFlowCacheService.QuestionSnapshot qs : questionBank.questions()) {
+            if (qs.questionType() == QuestionType.ESSAY) {
+                continue;
+            }
             ExamAttemptAnswer answer = answerByQuestionId.get(qs.questionId());
             String selectedOptionIds = encodeOptionIds(
                     decodeOptionIds(answer == null ? null : answer.getSelectedOptionIds()));
@@ -382,33 +418,39 @@ public class ExamAttemptService {
 
         List<TagInfo> tagInfos = attempt.getExam().getTags() == null ? List.of()
                 : attempt.getExam().getTags().stream()
-                .map(tag -> {
-                    TagInfo ti = new TagInfo();
-                    ti.setTagId(tag.getId());
-                    ti.setTagName(tag.getName());
-                    return ti;
-                })
-                .toList();
+                        .map(tag -> {
+                            TagInfo ti = new TagInfo();
+                            ti.setTagId(tag.getId());
+                            ti.setTagName(tag.getName());
+                            return ti;
+                        })
+                        .toList();
         event.setExamTags(tagInfos);
 
         rabbitMQEventPublisher.publishExamSubmitted(event);
     }
 
     private void createReviewEvents(ExamAttempt attempt,
-                                    List<ExamFlowCacheService.QuestionSnapshot> questions,
-                                    Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+            List<ExamFlowCacheService.QuestionSnapshot> questions,
+            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         questionReviewEventRepository.deleteByAttemptId(attempt.getId());
 
         String topicTagIds = attempt.getExam().getTags() == null
                 ? ""
                 : attempt.getExam().getTags().stream()
-                .map(tag -> String.valueOf(tag.getId()))
-                .sorted()
-                .collect(Collectors.joining(","));
+                        .map(tag -> String.valueOf(tag.getId()))
+                        .sorted()
+                        .collect(Collectors.joining(","));
 
         List<QuestionReviewEvent> events = new ArrayList<>();
         for (ExamFlowCacheService.QuestionSnapshot question : questions) {
+            if (question.questionType() == QuestionType.ESSAY) {
+                continue;
+            }
             ExamAttemptAnswer answer = answerByQuestionId.get(question.questionId());
+            if (answer == null) {
+                continue;
+            }
             Set<Long> selectedIds = decodeOptionIds(answer.getSelectedOptionIds());
             int quality = mapQuality(answer, selectedIds);
             double weight = question.scoreWeight() == null ? 1.0 : question.scoreWeight();
@@ -470,8 +512,8 @@ public class ExamAttemptService {
     }
 
     private AttemptResultResponse buildAttemptResult(ExamAttempt attempt,
-                                                     ExamFlowCacheService.QuestionBankSnapshot questionBank,
-                                                     Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+            ExamFlowCacheService.QuestionBankSnapshot questionBank,
+            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         if (questionBank == null) {
             questionBank = examFlowCacheService.getOrLoadQuestionBank(
                     attempt.getExam().getId(),
@@ -487,8 +529,8 @@ public class ExamAttemptService {
     }
 
     private AttemptResultResponse doBuildResult(ExamAttempt attempt,
-                                                ExamFlowCacheService.QuestionBankSnapshot questionBank,
-                                                Map<Long, ExamAttemptAnswer> answerByQuestionId) {
+            ExamFlowCacheService.QuestionBankSnapshot questionBank,
+            Map<Long, ExamAttemptAnswer> answerByQuestionId) {
         AttemptResultResponse response = new AttemptResultResponse();
         response.setAttemptId(attempt.getId());
         response.setExamId(attempt.getExam().getId());
@@ -509,8 +551,12 @@ public class ExamAttemptService {
             double weight = question.scoreWeight() == null ? 1.0 : question.scoreWeight();
 
             AttemptResultResponse.QuestionResult item = new AttemptResultResponse.QuestionResult();
+            item.setAnswerId(answer == null ? null : answer.getId());
             item.setQuestionId(question.questionId());
             item.setContent(question.content());
+            item.setQuestionType(question.questionType());
+            item.setAnswerStatus(answer == null ? null : answer.getStatus());
+            item.setScore(weight);
             item.setMaxScore(weight);
             item.setEarnedScore(answer == null ? 0.0 : answer.getEarnedScore());
             item.setCorrect(answer != null && Boolean.TRUE.equals(answer.getIsCorrect()));
@@ -538,6 +584,12 @@ public class ExamAttemptService {
                     .sorted(Comparator.naturalOrder())
                     .toList();
             item.setCorrectOptionIds(correctOptionIds);
+            item.setEssayAnswer(answer == null ? null : answer.getEssayAnswer());
+            item.setTextAnswer(answer == null ? null : answer.getEssayAnswer());
+            item.setFeedback(answer == null ? null : answer.getFeedback());
+            item.setTeacherFeedback(answer == null ? null : answer.getFeedback());
+            item.setSampleAnswer(question.sampleAnswer());
+            item.setGradingGuide(question.gradingGuide());
             questionResults.add(item);
         }
 
@@ -594,6 +646,15 @@ public class ExamAttemptService {
         return ids;
     }
 
+    private String normalizeTextAnswer(String textAnswer) {
+        if (textAnswer == null) {
+            return null;
+        }
+
+        String trimmed = textAnswer.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
     private ExamFlowCacheService.QuestionBankSnapshot loadQuestionBankSnapshot(Long examId) {
         List<Question> questions = questionRepository.findByExamIdAndIsHiddenFalseOrderByIdAsc(examId);
         if (questions.isEmpty()) {
@@ -604,7 +665,10 @@ public class ExamAttemptService {
                 .map(question -> new ExamFlowCacheService.QuestionSnapshot(
                         question.getId(),
                         question.getContent(),
-                        question.getScoreWeight()))
+                        question.getQuestionType() == null ? QuestionType.MULTIPLE_CHOICE : question.getQuestionType(),
+                        question.getScoreWeight(),
+                        question.getSampleAnswer(),
+                        question.getGradingGuide()))
                 .toList();
 
         List<Long> questionIds = questions.stream().map(Question::getId).toList();
@@ -678,35 +742,181 @@ public class ExamAttemptService {
     }
 
     @Transactional
-    public void gradeAnswer(Long attemptId, Long answerId, Long contributorId, com.exam_bank.exam_service.dto.GradeAnswerRequest request) {
-        ExamAttempt attempt = examAttemptRepository.findById(attemptId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Attempt not found"));
-
-        ExamAttemptAnswer answer = examAttemptAnswerRepository.findById(answerId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Answer not found"));
-
-        if (!answer.getAttempt().getId().equals(attemptId)) {
-            throw new ResponseStatusException(BAD_REQUEST, "Answer does not belong to this attempt");
-        }
-
-        answer.setEarnedScore(request.getScore());
-        answer.setTeacherFeedback(request.getTeacherFeedback());
-        examAttemptAnswerRepository.save(answer);
-
-        List<ExamAttemptAnswer> allAnswers = examAttemptAnswerRepository.findByAttemptIdOrderByQuestionIdAsc(attemptId);
-        double scoreRaw = 0.0;
-        double scoreMax = 0.0;
-
-        for (ExamAttemptAnswer a : allAnswers) {
-            scoreRaw += a.getEarnedScore() == null ? 0.0 : a.getEarnedScore();
-            scoreMax += a.getMaxScore() == null ? 0.0 : a.getMaxScore();
-        }
-
-        // Gọi hàm dùng chung để cập nhật điểm
-        updateAttemptScores(attempt, scoreRaw, scoreMax);
-        examAttemptRepository.save(attempt);
+    public void gradeAnswer(Long attemptId, Long answerId, Long contributorId, GradeAnswerRequest request) {
+        gradeEssaySubmissionInternal(answerId, contributorId, request, attemptId);
 
         log.info("gradeAnswer: attemptId={}, answerId={}, contributorId={}, newScore={}",
                 attemptId, answerId, contributorId, request.getScore());
+    }
+
+    @Transactional(readOnly = true)
+    public List<EssaySubmissionSummaryResponse> getPendingEssaySubmissions(Long contributorId) {
+        assertContributorId(contributorId);
+        return examAttemptAnswerRepository.findEssaySubmissionsByStatus(AnswerStatus.PENDING_REVIEW)
+                .stream()
+                .map(this::toEssaySubmissionSummary)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public EssaySubmissionDetailResponse getEssaySubmission(Long submissionId, Long contributorId) {
+        assertContributorId(contributorId);
+        ExamAttemptAnswer answer = examAttemptAnswerRepository.findEssaySubmissionById(submissionId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Essay submission not found"));
+        return toEssaySubmissionDetail(answer);
+    }
+
+    @Transactional
+    public EssaySubmissionDetailResponse gradeEssaySubmission(
+            Long submissionId,
+            Long contributorId,
+            GradeAnswerRequest request) {
+        return gradeEssaySubmissionInternal(submissionId, contributorId, request, null);
+    }
+
+    private EssaySubmissionDetailResponse gradeEssaySubmissionInternal(
+            Long submissionId,
+            Long contributorId,
+            GradeAnswerRequest request,
+            Long expectedAttemptId) {
+        assertContributorId(contributorId);
+
+        ExamAttemptAnswer answer = examAttemptAnswerRepository.findEssaySubmissionForUpdate(submissionId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Essay submission not found"));
+
+        if (expectedAttemptId != null && !answer.getAttempt().getId().equals(expectedAttemptId)) {
+            throw new ResponseStatusException(BAD_REQUEST, "Answer does not belong to this attempt");
+        }
+
+        if (answer.getStatus() != AnswerStatus.PENDING_REVIEW) {
+            throw new ResponseStatusException(CONFLICT, "Essay submission has already been graded");
+        }
+
+        double maxScore = answer.getMaxScore() == null ? 0.0 : answer.getMaxScore();
+        double score = request.getScore() == null ? 0.0 : request.getScore();
+        if (score > maxScore) {
+            throw new ResponseStatusException(BAD_REQUEST, "Score must not exceed question max score");
+        }
+
+        answer.setEarnedScore(score);
+        answer.setFeedback(normalizeTextAnswer(request.getFeedback()));
+        answer.setIsCorrect(score > 0.0);
+        answer.setStatus(AnswerStatus.MANUALLY_GRADED);
+        examAttemptAnswerRepository.save(answer);
+
+        recalculateAttemptAfterManualGrade(answer.getAttempt());
+
+        log.info("gradeEssaySubmission: submissionId={}, contributorId={}, score={}/{}",
+                submissionId, contributorId, score, maxScore);
+        return toEssaySubmissionDetail(answer);
+    }
+
+    private void recalculateAttemptAfterManualGrade(ExamAttempt attempt) {
+        List<ExamAttemptAnswer> allAnswers = examAttemptAnswerRepository
+                .findByAttemptIdOrderByQuestionIdAsc(attempt.getId());
+        double scoreRaw = 0.0;
+        double scoreMax = 0.0;
+        boolean hasPendingEssay = false;
+
+        for (ExamAttemptAnswer answer : allAnswers) {
+            scoreRaw += answer.getEarnedScore() == null ? 0.0 : answer.getEarnedScore();
+            scoreMax += answer.getMaxScore() == null ? 0.0 : answer.getMaxScore();
+            if (answer.getQuestion().getQuestionType() == QuestionType.ESSAY
+                    && answer.getStatus() == AnswerStatus.PENDING_REVIEW) {
+                hasPendingEssay = true;
+            }
+        }
+
+        updateAttemptScores(attempt, scoreRaw, scoreMax);
+        attempt.setStatus(hasPendingEssay ? ExamAttemptStatus.PARTIALLY_GRADED : ExamAttemptStatus.GRADED);
+        examAttemptRepository.save(attempt);
+    }
+
+    private void assertContributorId(Long contributorId) {
+        if (contributorId == null || contributorId <= 0) {
+            throw new ResponseStatusException(BAD_REQUEST, "Missing contributorId");
+        }
+    }
+
+    private EssaySubmissionSummaryResponse toEssaySubmissionSummary(ExamAttemptAnswer answer) {
+        ExamAttempt attempt = answer.getAttempt();
+        OnlineExam exam = attempt.getExam();
+        return EssaySubmissionSummaryResponse.builder()
+                .id(answer.getId())
+                .answerId(answer.getId())
+                .attemptId(attempt.getId())
+                .questionId(answer.getQuestion().getId())
+                .studentId(attempt.getUserId())
+                .studentName(resolveDisplayName(attempt.getUserId()))
+                .examId(exam.getId())
+                .examTitle(exam.getTitle())
+                .submittedAt(attempt.getSubmittedAt())
+                .score(answer.getEarnedScore())
+                .maxScore(answer.getMaxScore())
+                .status(answer.getStatus())
+                .build();
+    }
+
+    private EssaySubmissionDetailResponse toEssaySubmissionDetail(ExamAttemptAnswer answer) {
+        ExamAttempt attempt = answer.getAttempt();
+        OnlineExam exam = attempt.getExam();
+        Question question = answer.getQuestion();
+        return EssaySubmissionDetailResponse.builder()
+                .id(answer.getId())
+                .answerId(answer.getId())
+                .attemptId(attempt.getId())
+                .questionId(question.getId())
+                .studentId(attempt.getUserId())
+                .studentName(resolveDisplayName(attempt.getUserId()))
+                .examId(exam.getId())
+                .examTitle(exam.getTitle())
+                .submittedAt(attempt.getSubmittedAt())
+                .questionContent(question.getContent())
+                .essayAnswer(answer.getEssayAnswer())
+                .sampleAnswer(question.getSampleAnswer())
+                .gradingGuide(question.getGradingGuide())
+                .score(answer.getEarnedScore())
+                .maxScore(answer.getMaxScore())
+                .feedback(answer.getFeedback())
+                .status(answer.getStatus())
+                .build();
+    }
+
+    private String resolveDisplayName(Long userId) {
+        return authUserLookupClient.findDisplayNameByUserId(userId)
+                .orElse("User #" + userId);
+    }
+
+    private Optional<ExamFlowCacheService.QuestionSnapshot> findQuestionSnapshot(
+            ExamFlowCacheService.QuestionBankSnapshot questionBank,
+            Long questionId) {
+        return questionBank.questions()
+                .stream()
+                .filter(question -> question.questionId().equals(questionId))
+                .findFirst();
+    }
+
+    private String resolveEssayAnswer(SaveAttemptAnswerRequest request) {
+        return request.getEssayAnswer() != null ? request.getEssayAnswer() : request.getTextAnswer();
+    }
+
+    private Collection<Long> resolveSelectedOptionIds(SaveAttemptAnswerRequest request) {
+        if (request.getSelectedOptionIds() != null && !request.getSelectedOptionIds().isEmpty()) {
+            return request.getSelectedOptionIds();
+        }
+
+        if (request.getSelectedOptionId() != null) {
+            return List.of(request.getSelectedOptionId());
+        }
+
+        return List.of();
+    }
+
+    private List<ExamAttemptStatus> completedAttemptStatuses() {
+        return List.of(
+                ExamAttemptStatus.SUBMITTED,
+                ExamAttemptStatus.AUTO_SUBMITTED,
+                ExamAttemptStatus.PARTIALLY_GRADED,
+                ExamAttemptStatus.GRADED);
     }
 }

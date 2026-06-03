@@ -19,7 +19,7 @@ public class QuestionController {
     private final QuestionService questionService;
     private final AuthenticatedUserService authenticatedUserService;
 
-    @PreAuthorize("hasAnyRole('CONTRIBUTOR', 'ADMIN')")
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @PostMapping
     public ResponseEntity<Void> createQuestion(@Valid @RequestBody CreateQuestionRequest request) {
         Long contributorId = authenticatedUserService.getCurrentUserId();

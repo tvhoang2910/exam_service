@@ -15,6 +15,8 @@ import com.exam_bank.exam_service.service.ExamAuditService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.PageImpl;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
@@ -86,7 +88,7 @@ class QuestionReportServiceTest {
                 request.setResolutionNote("Da cap nhat dap an");
                 request.setUnhideQuestion(false);
 
-                questionReportService.resolveQuestionReports(questionId, resolvedBy, request);
+                questionReportService.resolveQuestionReports(questionId, resolvedBy, false, request);
 
                 verify(adminAlertPublisher).publishQuestionReportResolvedAlert(
                                 reporterIdsCaptor.capture(),
@@ -130,12 +132,69 @@ class QuestionReportServiceTest {
                 request.setResolutionNote("Không đủ bằng chứng");
                 request.setUnhideQuestion(false);
 
-                questionReportService.resolveQuestionReports(questionId, resolvedBy, request);
+                questionReportService.resolveQuestionReports(questionId, resolvedBy, false, request);
 
                 verify(adminAlertPublisher, never()).publishQuestionReportResolvedAlert(
                                 any(), any(), any(), any(), anyInt(), any());
                 assertThat(openReports)
                                 .allSatisfy(report -> assertThat(report.getStatus()).isEqualTo(ReportStatus.REJECTED));
+        }
+
+        @Test
+        @DisplayName("getReportQueue filters by exam creator for contributor")
+        void getReportQueueFiltersByExamCreatorForContributor() {
+                var pageable = PageRequest.of(0, 20);
+                Long contributorId = 44L;
+                Long questionId = 95L;
+                QuestionReport report = buildReport(questionId, 83L, "Contributor Exam", 3001L);
+                report.getQuestion().setContent("Question owned by contributor");
+
+                when(reportRepository.findQueuedQuestionIdsByExamCreator(String.valueOf(contributorId), pageable))
+                                .thenReturn(new PageImpl<>(List.of(questionId), pageable, 1));
+                when(reportRepository.findDetailedByQuestionIdAndStatusInOrderByCreatedAtDesc(eq(questionId),
+                                anyList()))
+                                .thenReturn(List.of(report));
+                when(reportRepository.countByQuestionIdAndStatusInGroupedType(eq(questionId), anyList()))
+                                .thenReturn(List.<Object[]>of(new Object[] {
+                                                com.exam_bank.exam_service.feature.reporting.entity.ReportType.OTHER,
+                                                1L }));
+                when(reportRepository.countDistinctReporterByQuestionIdAndStatusIn(eq(questionId), anyList()))
+                                .thenReturn(1L);
+
+                var result = questionReportService.getReportQueue(pageable, contributorId, false);
+
+                assertThat(result.getContent()).hasSize(1);
+                assertThat(result.getContent().getFirst().getQuestionId()).isEqualTo(questionId);
+                verify(reportRepository).findQueuedQuestionIdsByExamCreator(String.valueOf(contributorId), pageable);
+                verify(reportRepository, never()).findQueuedQuestionIds(pageable);
+        }
+
+        @Test
+        @DisplayName("resolveQuestionReports allows admin to bypass exam ownership check")
+        void resolveQuestionReportsAllowsAdminToBypassOwnershipCheck() {
+                Long questionId = 97L;
+                Long adminId = 1L;
+                List<QuestionReport> openReports = new ArrayList<>(List.of(
+                                buildReport(questionId, 84L, "Admin Visible Exam", 4001L)));
+
+                when(questionRepository.existsById(questionId)).thenReturn(true);
+                when(reportRepository.findDetailedByQuestionIdAndStatusInOrderByCreatedAtDesc(eq(questionId),
+                                anyList()))
+                                .thenReturn(openReports);
+                when(reportRepository.saveAll(openReports)).thenReturn(openReports);
+                when(historyRepository.save(any(QuestionReportHistory.class)))
+                                .thenAnswer(invocation -> invocation.getArgument(0));
+
+                ResolveReportRequest request = new ResolveReportRequest();
+                request.setStatus(ReportStatus.RESOLVED);
+                request.setResolutionNote("Admin handled");
+                request.setUnhideQuestion(false);
+
+                questionReportService.resolveQuestionReports(questionId, adminId, true, request);
+
+                verify(questionRepository).existsById(questionId);
+                verify(questionRepository, never()).existsByIdAndExamCreatedBy(eq(questionId), any());
+                assertThat(openReports.getFirst().getStatus()).isEqualTo(ReportStatus.RESOLVED);
         }
 
         private QuestionReport buildReport(Long questionId, Long examId, String examTitle, Long reporterId) {

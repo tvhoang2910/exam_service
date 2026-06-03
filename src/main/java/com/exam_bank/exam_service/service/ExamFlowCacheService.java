@@ -1,6 +1,7 @@
 package com.exam_bank.exam_service.service;
 
 import com.exam_bank.exam_service.dto.ExamResponse;
+import com.exam_bank.exam_service.entity.QuestionType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -77,7 +78,10 @@ public class ExamFlowCacheService {
 
     public record QuestionSnapshot(Long questionId,
             String content,
-            Double scoreWeight) {
+            QuestionType questionType,
+            Double scoreWeight,
+            String sampleAnswer,
+            String gradingGuide) {
     }
 
     public record OptionSnapshot(Long optionId,

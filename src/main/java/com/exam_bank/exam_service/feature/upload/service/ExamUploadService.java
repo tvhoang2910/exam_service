@@ -48,7 +48,6 @@ import java.io.InputStream;
 @Slf4j
 public class ExamUploadService {
 
-    private static final String ROLE_ADMIN = "ADMIN";
     private static final String ROLE_CONTRIBUTOR = "CONTRIBUTOR";
     private static final String ROLE_USER = "USER";
 
@@ -108,45 +107,26 @@ public class ExamUploadService {
         String role = currentRole();
 
         ExamUploadRequest request = loadOrThrow(uploadId);
-        if (!request.getUploaderId().equals(userId) && !isAdminOrContributor(role)) {
+        if (!request.getUploaderId().equals(userId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to complete this upload");
         }
-        if (request.getStatus() != ExamUploadStatus.PENDING_APPROVAL
-                && request.getStatus() != ExamUploadStatus.SELF_UPLOADED) {
+        if (request.getStatus() != ExamUploadStatus.PENDING_APPROVAL) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Upload is not in a completable state: " + request.getStatus());
         }
 
         ExamUploadStatus previous = request.getStatus();
-        boolean selfUpload = isAdminOrContributor(request.getUploaderRole());
-        String action;
-        ExamUploadStatus next;
-        if (selfUpload) {
-            next = ExamUploadStatus.SELF_UPLOADED;
-            action = "SELF_UPLOADED";
-        } else {
-            next = ExamUploadStatus.PENDING_APPROVAL;
-            action = "SUBMITTED";
-        }
+        ExamUploadStatus next = ExamUploadStatus.PENDING_APPROVAL;
         request.setStatus(next);
         ExamUploadRequest saved = uploadRequestRepository.save(request);
-        writeHistory(saved.getId(), action, previous, next, userId, role,
+        writeHistory(saved.getId(), "SUBMITTED", previous, next, userId, role,
                 req == null ? null : req.getNote());
 
-        if (selfUpload) {
-            adminAlertPublisher.publishSelfUploadAudit(saved.getId(), saved.getTitle(), saved.getUploaderId(),
-                    saved.getUploaderRole());
-            ExamUploadRequest extracting = startExtraction(saved, userId, role, next);
-            log.info("Upload {} self-uploaded by user {} (role={}, EXTRACTING)",
-                    extracting.getId(), userId, role);
-            return toResponse(extracting, false);
-        } else {
-            adminAlertPublisher.publishUploadSubmittedAlert(saved.getId(), saved.getTitle(), saved.getUploaderId(),
-                    null);
-        }
+        adminAlertPublisher.publishUploadSubmittedAlert(saved.getId(), saved.getTitle(), saved.getUploaderId(),
+                null);
 
-        log.info("Upload {} completed by user {} (selfUpload={}, newStatus={})",
-                saved.getId(), userId, selfUpload, next);
+        log.info("Upload {} completed by user {} (newStatus={})",
+                saved.getId(), userId, next);
 
         return toResponse(saved, false);
     }
@@ -164,9 +144,12 @@ public class ExamUploadService {
 
     @Transactional(readOnly = true)
     public ExamUploadPageResponse listPendingQueue(int page, int size) {
+        Long reviewerId = authenticatedUserService.getCurrentUserId();
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.max(size, 1),
                 Sort.by(Sort.Direction.ASC, "createdAt"));
-        Page<ExamUploadRequest> result = uploadRequestRepository.findSubmittedByStatus(ExamUploadStatus.PENDING_APPROVAL,
+        Page<ExamUploadRequest> result = uploadRequestRepository.findPendingForReviewer(
+                ExamUploadStatus.PENDING_APPROVAL,
+                reviewerId,
                 pageable);
         return ExamUploadPageResponse.from(result.map(e -> toResponse(e, false)));
     }
@@ -176,7 +159,7 @@ public class ExamUploadService {
         Long userId = authenticatedUserService.getCurrentUserId();
         String role = currentRole();
         ExamUploadRequest entity = loadOrThrow(uploadId);
-        if (!entity.getUploaderId().equals(userId) && !isAdminOrContributor(role)) {
+        if (!entity.getUploaderId().equals(userId) && !isContributor(role)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this upload");
         }
         return toResponse(entity, true);
@@ -187,7 +170,7 @@ public class ExamUploadService {
         Long userId = authenticatedUserService.getCurrentUserId();
         String role = currentRole();
         ExamUploadRequest entity = loadOrThrow(uploadId);
-        if (!entity.getUploaderId().equals(userId) && !isAdminOrContributor(role)) {
+        if (!entity.getUploaderId().equals(userId) && !isContributor(role)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this upload");
         }
 
@@ -206,7 +189,7 @@ public class ExamUploadService {
         Long userId = authenticatedUserService.getCurrentUserId();
         String role = currentRole();
         ExamUploadRequest entity = loadOrThrow(uploadId);
-        if (!entity.getUploaderId().equals(userId) && !isAdminOrContributor(role)) {
+        if (!entity.getUploaderId().equals(userId) && !isContributor(role)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to view this history");
         }
         return historyRepository.findByUploadRequestIdOrderByCreatedAtDesc(uploadId).stream()
@@ -218,13 +201,16 @@ public class ExamUploadService {
     public ExamUploadResponse approve(Long uploadId) {
         Long reviewerId = authenticatedUserService.getCurrentUserId();
         String role = currentRole();
-        if (!isAdminOrContributor(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only ADMIN/CONTRIBUTOR can approve");
+        if (!isContributor(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only CONTRIBUTOR can approve");
         }
         ExamUploadRequest entity = loadOrThrow(uploadId);
         if (entity.getStatus() != ExamUploadStatus.PENDING_APPROVAL) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Only PENDING_APPROVAL uploads can be approved. Current=" + entity.getStatus());
+        }
+        if (entity.getUploaderId().equals(reviewerId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "You cannot approve your own upload");
         }
 
         ExamUploadStatus previous = entity.getStatus();
@@ -249,13 +235,16 @@ public class ExamUploadService {
     public ExamUploadResponse reject(Long uploadId, RejectUploadRequest req) {
         Long reviewerId = authenticatedUserService.getCurrentUserId();
         String role = currentRole();
-        if (!isAdminOrContributor(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only ADMIN/CONTRIBUTOR can reject");
+        if (!isContributor(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only CONTRIBUTOR can reject");
         }
         ExamUploadRequest entity = loadOrThrow(uploadId);
         if (entity.getStatus() != ExamUploadStatus.PENDING_APPROVAL) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Only PENDING_APPROVAL uploads can be rejected. Current=" + entity.getStatus());
+        }
+        if (entity.getUploaderId().equals(reviewerId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "You cannot reject your own upload");
         }
 
         ExamUploadStatus previous = entity.getStatus();
@@ -399,9 +388,6 @@ public class ExamUploadService {
             if (a == null) {
                 continue;
             }
-            if (a.equals("ROLE_ADMIN")) {
-                return ROLE_ADMIN;
-            }
             if (a.equals("ROLE_CONTRIBUTOR")) {
                 return ROLE_CONTRIBUTOR;
             }
@@ -412,8 +398,8 @@ public class ExamUploadService {
         return ROLE_USER;
     }
 
-    private boolean isAdminOrContributor(String role) {
-        return ROLE_ADMIN.equals(role) || ROLE_CONTRIBUTOR.equals(role);
+    private boolean isContributor(String role) {
+        return ROLE_CONTRIBUTOR.equals(role);
     }
 
     public record UploadPageStream(InputStream inputStream, String contentType, String objectKey) {

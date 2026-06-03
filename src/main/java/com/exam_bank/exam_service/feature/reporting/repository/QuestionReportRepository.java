@@ -86,6 +86,19 @@ public interface QuestionReportRepository extends JpaRepository<QuestionReport, 
                         SELECT qr.question_id
                         FROM question_report_history qrh
                         JOIN question_reports qr ON qr.id = qrh.report_id
+                        GROUP BY qr.question_id
+                        ORDER BY MAX(COALESCE(qrh.processed_at, qrh.created_at)) DESC
+                        """, countQuery = """
+                        SELECT COUNT(DISTINCT qr.question_id)
+                        FROM question_report_history qrh
+                        JOIN question_reports qr ON qr.id = qrh.report_id
+                        """, nativeQuery = true)
+        Page<Long> findProcessedQuestionIds(Pageable pageable);
+
+        @Query(value = """
+                        SELECT qr.question_id
+                        FROM question_report_history qrh
+                        JOIN question_reports qr ON qr.id = qrh.report_id
                         JOIN questions q ON q.id = qr.question_id
                         JOIN online_exams exam ON exam.id = q.exam_id
                         WHERE exam.created_by = :createdBy

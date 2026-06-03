@@ -12,7 +12,13 @@ public class SaveAttemptAnswerRequest {
     @NotNull
     private Long questionId;
 
+    private Long selectedOptionId;
+
     private List<Long> selectedOptionIds;
+
+    private String essayAnswer;
+
+    private String textAnswer;
 
     private Long responseTimeMs;
 

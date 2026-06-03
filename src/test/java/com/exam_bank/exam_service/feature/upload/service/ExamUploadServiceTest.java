@@ -232,32 +232,27 @@ class ExamUploadServiceTest {
     }
 
     @Test
-    @DisplayName("completeUpload by ADMIN self-upload starts extraction and publishes audit")
-    void completeUpload_byAdminSelf_setsSelfUploadedStatus_auditNotification() {
-        authenticateAs("ADMIN");
+    @DisplayName("completeUpload by CONTRIBUTOR still queues for manual approval")
+    void completeUpload_byContributor_stillRequiresManualApproval() {
+        authenticateAs("CONTRIBUTOR");
         when(authenticatedUserService.getCurrentUserId()).thenReturn(7L);
-        ExamUploadRequest existing = buildUpload(200L, 7L, "ADMIN", ExamUploadStatus.PENDING_APPROVAL);
-        OnlineExam savedExam = new OnlineExam();
-        savedExam.setId(9000L);
+        ExamUploadRequest existing = buildUpload(200L, 7L, "CONTRIBUTOR", ExamUploadStatus.PENDING_APPROVAL);
         when(uploadRequestRepository.findById(200L)).thenReturn(java.util.Optional.of(existing));
         when(uploadRequestRepository.save(any(ExamUploadRequest.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(onlineExamRepository.save(any(OnlineExam.class))).thenReturn(savedExam);
 
         ExamUploadResponse resp = service.completeUpload(200L, new CompleteUploadRequest(null));
 
-        assertThat(resp.getStatus()).isEqualTo(ExamUploadStatus.EXTRACTING);
-        assertThat(resp.getExtractedExamId()).isEqualTo(9000L);
+        assertThat(resp.getStatus()).isEqualTo(ExamUploadStatus.PENDING_APPROVAL);
+        assertThat(resp.getExtractedExamId()).isNull();
 
         ArgumentCaptor<ExamUploadHistory> historyCaptor = ArgumentCaptor.forClass(ExamUploadHistory.class);
-        verify(historyRepository, times(2)).save(historyCaptor.capture());
-        assertThat(historyCaptor.getAllValues().get(0).getAction()).isEqualTo("SELF_UPLOADED");
-        assertThat(historyCaptor.getAllValues().get(0).getNewStatus()).isEqualTo(ExamUploadStatus.SELF_UPLOADED);
-        assertThat(historyCaptor.getAllValues().get(1).getAction()).isEqualTo("EXTRACTION_STARTED");
-        assertThat(historyCaptor.getAllValues().get(1).getNewStatus()).isEqualTo(ExamUploadStatus.EXTRACTING);
+        verify(historyRepository).save(historyCaptor.capture());
+        assertThat(historyCaptor.getValue().getAction()).isEqualTo("SUBMITTED");
+        assertThat(historyCaptor.getValue().getNewStatus()).isEqualTo(ExamUploadStatus.PENDING_APPROVAL);
 
-        verify(adminAlertPublisher).publishSelfUploadAudit(eq(200L), eq("Mock title"), eq(7L), eq("ADMIN"));
-        verify(adminAlertPublisher, never()).publishUploadSubmittedAlert(anyLong(), anyString(), anyLong(), any());
-        verify(rabbitMQEventPublisher).publishFileUploadedEvent(any(ExamSourceUploadedEvent.class));
+        verify(adminAlertPublisher).publishUploadSubmittedAlert(eq(200L), eq("Mock title"), eq(7L), any());
+        verify(adminAlertPublisher, never()).publishSelfUploadAudit(anyLong(), anyString(), anyLong(), anyString());
+        verifyNoInteractions(onlineExamRepository, rabbitMQEventPublisher);
     }
 
     @Test
@@ -279,7 +274,7 @@ class ExamUploadServiceTest {
     @Test
     @DisplayName("approve transitions to EXTRACTING, creates draft exam, publishes event, notifies owner")
     void approve_transitionsToExtracting_createsDraftExam_publishesEvent_notifiesOwner() {
-        authenticateAs("ADMIN");
+        authenticateAs("CONTRIBUTOR");
         when(authenticatedUserService.getCurrentUserId()).thenReturn(555L);
 
         ExamUploadRequest existing = buildUpload(300L, 42L, "USER", ExamUploadStatus.PENDING_APPROVAL);
@@ -328,7 +323,7 @@ class ExamUploadServiceTest {
     @Test
     @DisplayName("approve from a non-pending state throws 409")
     void approve_fromNonPending_throws409() {
-        authenticateAs("ADMIN");
+        authenticateAs("CONTRIBUTOR");
         when(authenticatedUserService.getCurrentUserId()).thenReturn(555L);
         ExamUploadRequest existing = buildUpload(300L, 42L, "USER", ExamUploadStatus.APPROVED);
         when(uploadRequestRepository.findById(300L)).thenReturn(java.util.Optional.of(existing));
@@ -340,9 +335,23 @@ class ExamUploadServiceTest {
     }
 
     @Test
+    @DisplayName("approve own upload throws 409")
+    void approve_ownUpload_throws409() {
+        authenticateAs("CONTRIBUTOR");
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(42L);
+        ExamUploadRequest existing = buildUpload(300L, 42L, "CONTRIBUTOR", ExamUploadStatus.PENDING_APPROVAL);
+        when(uploadRequestRepository.findById(300L)).thenReturn(java.util.Optional.of(existing));
+
+        assertThatThrownBy(() -> service.approve(300L))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        ex -> assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+        verifyNoInteractions(onlineExamRepository, rabbitMQEventPublisher, historyRepository);
+    }
+
+    @Test
     @DisplayName("approve rolls back to APPROVED and throws IllegalStateException when publish fails")
     void approve_whenPublishThrowsAmqpException_thenRollbackStatusAndThrow() {
-        authenticateAs("ADMIN");
+        authenticateAs("CONTRIBUTOR");
         when(authenticatedUserService.getCurrentUserId()).thenReturn(555L);
 
         ExamUploadRequest existing = buildUpload(301L, 42L, "USER", ExamUploadStatus.PENDING_APPROVAL);
@@ -380,7 +389,7 @@ class ExamUploadServiceTest {
     @Test
     @DisplayName("reject stores reason, writes REJECTED history, and notifies owner")
     void reject_storesReason_writesHistory_notifiesOwner() {
-        authenticateAs("ADMIN");
+        authenticateAs("CONTRIBUTOR");
         when(authenticatedUserService.getCurrentUserId()).thenReturn(555L);
         ExamUploadRequest existing = buildUpload(400L, 42L, "USER", ExamUploadStatus.PENDING_APPROVAL);
         when(uploadRequestRepository.findById(400L)).thenReturn(java.util.Optional.of(existing));
@@ -406,7 +415,7 @@ class ExamUploadServiceTest {
     @Test
     @DisplayName("reject from a non-pending state throws 409")
     void reject_fromNonPending_throws409() {
-        authenticateAs("ADMIN");
+        authenticateAs("CONTRIBUTOR");
         when(authenticatedUserService.getCurrentUserId()).thenReturn(555L);
         ExamUploadRequest existing = buildUpload(400L, 42L, "USER", ExamUploadStatus.REJECTED);
         when(uploadRequestRepository.findById(400L)).thenReturn(java.util.Optional.of(existing));
@@ -445,16 +454,16 @@ class ExamUploadServiceTest {
     @Test
     @DisplayName("listPendingQueue returns only submitted PENDING_APPROVAL entries")
     void listPendingQueue_returnsOnlyPendingStatus() {
+        when(authenticatedUserService.getCurrentUserId()).thenReturn(99L);
         ExamUploadRequest e = buildUpload(11L, 42L, "USER", ExamUploadStatus.PENDING_APPROVAL);
         Page<ExamUploadRequest> page = new PageImpl<>(List.of(e));
-        when(uploadRequestRepository.findSubmittedByStatus(eq(ExamUploadStatus.PENDING_APPROVAL), any(Pageable.class)))
+        when(uploadRequestRepository.findPendingForReviewer(eq(ExamUploadStatus.PENDING_APPROVAL), eq(99L), any(Pageable.class)))
                 .thenReturn(page);
 
         ExamUploadPageResponse resp = service.listPendingQueue(0, 20);
 
         assertThat(resp.getContent()).hasSize(1);
         assertThat(resp.getContent().get(0).getStatus()).isEqualTo(ExamUploadStatus.PENDING_APPROVAL);
-        verify(uploadRequestRepository).findSubmittedByStatus(eq(ExamUploadStatus.PENDING_APPROVAL), any(Pageable.class));
-        verifyNoInteractions(authenticatedUserService);
+        verify(uploadRequestRepository).findPendingForReviewer(eq(ExamUploadStatus.PENDING_APPROVAL), eq(99L), any(Pageable.class));
     }
 }

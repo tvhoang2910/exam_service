@@ -147,10 +147,11 @@ class ExamAttemptControllerIntegrationTest {
 
         /**
          * Creates a published exam with 1 question and returns its ID.
-         * Uses admin token for creation and status change.
+         * Uses contributor token for creation and admin token for publish.
          */
         private Long createPublishedExam() {
-                String adminToken = generateToken(1L, "ADMIN");
+                String contributorToken = generateToken(1L, "CONTRIBUTOR");
+                String adminToken = generateToken(2L, "ADMIN");
                 String title = "Attempt Test Exam " + UUID.randomUUID().toString().substring(0, 8);
 
                 CreateExamRequest request = new CreateExamRequest();
@@ -168,7 +169,7 @@ class ExamAttemptControllerIntegrationTest {
                                 "What is 1+1?", "Basic arithmetic", 1.0, List.of(opt1, opt2));
                 request.setQuestions(List.of(question));
 
-                HttpHeaders headers = bearerJsonHeaders(adminToken);
+                HttpHeaders headers = bearerJsonHeaders(contributorToken);
                 ResponseEntity<ExamResponse> createResponse = restTemplate.exchange(
                                 BASE + "/exams", HttpMethod.POST,
                                 new HttpEntity<>(request, headers), ExamResponse.class);
@@ -191,7 +192,7 @@ class ExamAttemptControllerIntegrationTest {
                 ResponseEntity<ExamResponse> response = restTemplate.exchange(
                                 BASE + "/exams/manage/" + examId,
                                 HttpMethod.GET,
-                                new HttpEntity<>(bearerHeaders(generateToken(1L, "ADMIN"))),
+                                new HttpEntity<>(bearerHeaders(generateToken(1L, "CONTRIBUTOR"))),
                                 ExamResponse.class);
                 assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
                 return response.getBody();

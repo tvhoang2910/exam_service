@@ -7,6 +7,8 @@ import com.exam_bank.exam_service.dto.internal.AiQuestionDto;
 import com.exam_bank.exam_service.dto.internal.AiOptionDto;
 import com.exam_bank.exam_service.dto.message.ExamSyncEvent;
 import com.exam_bank.exam_service.entity.*;
+import com.exam_bank.exam_service.feature.upload.entity.ExamUploadStatus;
+import com.exam_bank.exam_service.feature.upload.repository.ExamUploadRequestRepository;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportHistoryRepository;
 import com.exam_bank.exam_service.feature.reporting.repository.QuestionReportRepository;
 import com.exam_bank.exam_service.repository.*;
@@ -44,6 +46,7 @@ public class ExamManagementService {
     private final QuestionReviewEventRepository questionReviewEventRepo;
     private final QuestionReportRepository questionReportRepo;
     private final QuestionReportHistoryRepository questionReportHistoryRepo;
+    private final ExamUploadRequestRepository examUploadRequestRepository;
     private final TagRepository tagRepo;
     private final TagService tagService;
     private final ExamFlowCacheService examFlowCacheService;
@@ -94,14 +97,15 @@ public class ExamManagementService {
 
     @Transactional(readOnly = true)
     public List<ExamResponse> getManagedExams() {
-        // Include all statuses: DRAFT, PUBLISHED, ARCHIVED
-        List<OnlineExam> exams = examRepo.findAllByOrderByCreatedAtDesc();
-        return mapExamListToSummary(exams);
+        List<OnlineExam> exams = isCurrentUserAdmin()
+                ? examRepo.findAllByOrderByCreatedAtDesc()
+                : examRepo.findByCreatedByOrderByCreatedAtDesc(String.valueOf(authenticatedUserService.getCurrentUserId()));
+        return mapExamListToSummary(filterHiddenAiExtractionDrafts(exams));
     }
 
     @Transactional(readOnly = true)
     public ExamResponse getManagedExamById(Long examId) {
-        OnlineExam exam = findExamOrThrow(examId);
+        OnlineExam exam = findManagedExamOrThrow(examId);
         return mapExamToResponse(exam, true, true, true, null, false);
     }
 
@@ -109,7 +113,7 @@ public class ExamManagementService {
     @CacheEvict(cacheNames = {"publicExams", "publicExamDetail", "managedExams",
             "managedExamDetail"}, allEntries = true)
     public ExamResponse updateExam(Long examId, CreateExamRequest request) {
-        OnlineExam existing = findExamOrThrow(examId);
+        OnlineExam existing = findManagedExamOrThrow(examId);
 
         long attemptCount = examAttemptRepo.countByExamId(examId);
         List<Question> existingQuestions = questionRepo.findByExamIdOrderByIdAsc(examId);
@@ -139,7 +143,7 @@ public class ExamManagementService {
     @CacheEvict(cacheNames = {"publicExams", "publicExamDetail", "managedExams",
             "managedExamDetail"}, allEntries = true)
     public void deleteExam(Long examId) {
-        OnlineExam existing = findExamOrThrow(examId);
+        OnlineExam existing = findManagedExamOrThrow(examId);
         List<Question> existingQuestions = questionRepo.findByExamIdOrderByIdAsc(examId);
         List<Long> questionIds = existingQuestions.stream().map(BaseEntity::getId).toList();
         List<Long> attemptIds = examAttemptRepo.findIdsByExamId(examId);
@@ -189,7 +193,7 @@ public class ExamManagementService {
     @CacheEvict(cacheNames = {"publicExams", "publicExamDetail", "managedExams",
             "managedExamDetail"}, allEntries = true)
     public ExamResponse updateExamStatus(Long examId, OnlineExamStatus status) {
-        OnlineExam existing = findExamOrThrow(examId);
+        OnlineExam existing = findManagedExamOrThrow(examId);
 
         if (status == OnlineExamStatus.PUBLISHED) {
             Integer total = existing.getTotalQuestions();
@@ -239,6 +243,65 @@ public class ExamManagementService {
     private OnlineExam findExamOrThrow(Long examId) {
         return examRepo.findById(examId)
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Exam not found"));
+    }
+
+    private OnlineExam findManagedExamOrThrow(Long examId) {
+        OnlineExam exam = findExamOrThrow(examId);
+        if (isCurrentUserAdmin()) {
+            ensureVisibleManagedExam(exam);
+            return exam;
+        }
+
+        String currentUserId = String.valueOf(authenticatedUserService.getCurrentUserId());
+        if (!currentUserId.equals(exam.getCreatedBy())) {
+            throw new ResponseStatusException(NOT_FOUND, "Exam not found");
+        }
+        ensureVisibleManagedExam(exam);
+        return exam;
+    }
+
+    private List<OnlineExam> filterHiddenAiExtractionDrafts(List<OnlineExam> exams) {
+        if (exams.isEmpty()) {
+            return exams;
+        }
+
+        Set<Long> aiExtractedIds = exams.stream()
+                .filter(this::isAiExtractionPlaceholder)
+                .map(OnlineExam::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        if (aiExtractedIds.isEmpty()) {
+            return exams;
+        }
+
+        Set<Long> hiddenExamIds = examUploadRequestRepository.findHiddenManagedExamIds(
+                aiExtractedIds,
+                List.of(ExamUploadStatus.EXTRACTED));
+        if (hiddenExamIds.isEmpty()) {
+            return exams;
+        }
+
+        return exams.stream()
+                .filter(exam -> !hiddenExamIds.contains(exam.getId()))
+                .toList();
+    }
+
+    private void ensureVisibleManagedExam(OnlineExam exam) {
+        if (!isAiExtractionPlaceholder(exam)) {
+            return;
+        }
+
+        examUploadRequestRepository.findByExtractedExamId(exam.getId())
+                .filter(upload -> upload.getStatus() == ExamUploadStatus.EXTRACTED)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Exam not found"));
+    }
+
+    private boolean isAiExtractionPlaceholder(OnlineExam exam) {
+        return exam.getSource() == OnlineExamSource.AI_EXTRACTED
+                && (exam.getTotalQuestions() == null || exam.getTotalQuestions() <= 0);
+    }
+
+    private boolean isCurrentUserAdmin() {
+        return authenticatedUserService.currentUserHasRole("ADMIN");
     }
 
     private OnlineExam buildExamEntity(OnlineExam exam, CreateExamRequest request) {
@@ -311,15 +374,20 @@ public class ExamManagementService {
         }
 
         for (CreateExamRequest.QuestionDto qDto : questionDtos) {
+            validateQuestionDto(qDto);
+            QuestionType questionType = resolveQuestionType(qDto.getQuestionType());
             Question question = new Question();
             question.setExam(exam);
             question.setContent(qDto.getContent());
+            question.setQuestionType(questionType);
             question.setExplanation(qDto.getExplanation());
-            question.setScoreWeight(qDto.getScoreWeight());
+            question.setScoreWeight(resolveQuestionScore(qDto));
+            question.setSampleAnswer(qDto.getSampleAnswer());
+            question.setGradingGuide(qDto.getGradingGuide());
 
             Question savedQuestion = questionRepo.save(question);
 
-            if (qDto.getOptions() == null || qDto.getOptions().isEmpty()) {
+            if (questionType == QuestionType.ESSAY || qDto.getOptions() == null || qDto.getOptions().isEmpty()) {
                 continue;
             }
 
@@ -342,6 +410,71 @@ public class ExamManagementService {
         sm2RecordRepo.deleteByQuestionIdIn(questionIds);
         optionRepo.deleteByQuestionIdIn(questionIds);
         questionRepo.deleteByExamId(questions.getFirst().getExam().getId());
+    }
+
+    private void validateQuestionDto(CreateExamRequest.QuestionDto question) {
+        if (question == null || !StringUtils.hasText(question.getContent())) {
+            throw new ResponseStatusException(BAD_REQUEST, "Question content must not be empty");
+        }
+
+        QuestionType questionType = resolveQuestionType(question.getQuestionType());
+        List<CreateExamRequest.OptionDto> options = question.getOptions() == null ? List.of() : question.getOptions();
+
+        if (questionType == QuestionType.ESSAY) {
+            if (!options.isEmpty()) {
+                throw new ResponseStatusException(BAD_REQUEST, "Essay questions must not define options");
+            }
+            if (!StringUtils.hasText(question.getSampleAnswer())) {
+                throw new ResponseStatusException(BAD_REQUEST, "Essay questions must define a sample answer");
+            }
+            if (!StringUtils.hasText(question.getGradingGuide())) {
+                throw new ResponseStatusException(BAD_REQUEST, "Essay questions must define a grading guide");
+            }
+            return;
+        }
+
+        if (options.size() < 2) {
+            throw new ResponseStatusException(BAD_REQUEST, "Multiple-choice questions must have at least 2 options");
+        }
+
+        boolean hasCorrectOption = false;
+        for (CreateExamRequest.OptionDto option : options) {
+            if (option == null || !StringUtils.hasText(option.getContent())) {
+                throw new ResponseStatusException(BAD_REQUEST, "Option content must not be empty");
+            }
+            hasCorrectOption = hasCorrectOption || Boolean.TRUE.equals(option.getIsCorrect());
+        }
+
+        if (!hasCorrectOption) {
+            throw new ResponseStatusException(BAD_REQUEST, "Multiple-choice questions must have at least one correct option");
+        }
+    }
+
+    private QuestionType resolveQuestionType(QuestionType questionType) {
+        return questionType == null ? QuestionType.MULTIPLE_CHOICE : questionType;
+    }
+
+    private double resolveQuestionScore(CreateExamRequest.QuestionDto question) {
+        return resolveQuestionScore(question.getScore(), question.getScoreWeight());
+    }
+
+    private double resolveQuestionScore(Double score, Double scoreWeight) {
+        Double resolved = score != null ? score : scoreWeight;
+        if (resolved == null || resolved <= 0) {
+            return 1.0;
+        }
+        return resolved;
+    }
+
+    private QuestionType parseQuestionType(String rawQuestionType, List<AiOptionDto> options) {
+        if (StringUtils.hasText(rawQuestionType)) {
+            try {
+                return QuestionType.valueOf(rawQuestionType.trim().toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+                // fall back to option presence below
+            }
+        }
+        return options == null || options.isEmpty() ? QuestionType.ESSAY : QuestionType.MULTIPLE_CHOICE;
     }
 
     private boolean isQuestionTreeChanged(List<Question> existingQuestions,
@@ -371,12 +504,26 @@ public class ExamManagementService {
                 return true;
             }
 
+            if (resolveQuestionType(existingQuestion.getQuestionType()) != resolveQuestionType(requestedQuestion.getQuestionType())) {
+                return true;
+            }
+
             if (!Objects.equals(normalize(existingQuestion.getExplanation()),
                     normalize(requestedQuestion.getExplanation()))) {
                 return true;
             }
 
-            if (!Objects.equals(existingQuestion.getScoreWeight(), requestedQuestion.getScoreWeight())) {
+            if (!Objects.equals(existingQuestion.getScoreWeight(), resolveQuestionScore(requestedQuestion))) {
+                return true;
+            }
+
+            if (!Objects.equals(normalize(existingQuestion.getSampleAnswer()),
+                    normalize(requestedQuestion.getSampleAnswer()))) {
+                return true;
+            }
+
+            if (!Objects.equals(normalize(existingQuestion.getGradingGuide()),
+                    normalize(requestedQuestion.getGradingGuide()))) {
                 return true;
             }
 
@@ -385,6 +532,10 @@ public class ExamManagementService {
             List<CreateExamRequest.OptionDto> requestedOptions = requestedQuestion.getOptions() == null
                     ? List.of()
                     : requestedQuestion.getOptions();
+
+            if (resolveQuestionType(requestedQuestion.getQuestionType()) == QuestionType.ESSAY) {
+                requestedOptions = List.of();
+            }
 
             if (existingOptions.size() != requestedOptions.size()) {
                 return true;
@@ -484,8 +635,12 @@ public class ExamManagementService {
             ExamResponse.QuestionResponse questionResponse = new ExamResponse.QuestionResponse();
             questionResponse.setId(question.getId());
             questionResponse.setContent(question.getContent());
+            questionResponse.setQuestionType(resolveQuestionType(question.getQuestionType()));
             questionResponse.setExplanation(question.getExplanation());
+            questionResponse.setScore(question.getScoreWeight());
             questionResponse.setScoreWeight(question.getScoreWeight());
+            questionResponse.setSampleAnswer(question.getSampleAnswer());
+            questionResponse.setGradingGuide(question.getGradingGuide());
             questionResponse.setDifficulty(
                     question.getDifficulty() == null ? Question.Difficulty.MEDIUM : question.getDifficulty());
 
@@ -524,24 +679,46 @@ public class ExamManagementService {
             // 2. Dịch chuỗi JSON thành List<AiQuestionDto>
             ObjectMapper mapper = new ObjectMapper();
             String normalizedJson = AiJsonNormalizer.normalizeQuestionArray(jsonResult);
-            List<AiQuestionDto> parsedQuestions = mapper.readValue(normalizedJson, new TypeReference<List<AiQuestionDto>>() {
-            });
+            
+            List<AiQuestionDto> parsedQuestions;
+            try {
+                parsedQuestions = mapper.readValue(normalizedJson, new TypeReference<List<AiQuestionDto>>() {
+                });
+            } catch (Exception ex) {
+                // If parsing fails, try removing remaining invalid escape sequences
+                // Pattern: backslash followed by any char that's not a valid JSON escape
+                String sanitized = normalizedJson.replaceAll("\\\\([^\"\\\\\\\\/ bfnrtu])", "$1");
+                log.warn("JSON parse failed for examId={}, retrying with sanitized content: {}", 
+                        examId, ex.getMessage());
+                try {
+                    parsedQuestions = mapper.readValue(sanitized, new TypeReference<List<AiQuestionDto>>() {
+                    });
+                } catch (Exception ex2) {
+                    log.error("JSON parse failed even after sanitization for examId={}. Error: {}", 
+                            examId, ex2.getMessage(), ex2);
+                    throw new RuntimeException("Failed to parse AI JSON even after sanitization", ex2);
+                }
+            }
 
             List<Question> questionsToSave = new ArrayList<>();
             List<QuestionOption> optionsToSave = new ArrayList<>();
 
             // 3. Chuyển đổi DTO thành Entity
             for (AiQuestionDto dto : parsedQuestions) {
+                QuestionType questionType = parseQuestionType(dto.getQuestionType(), dto.getOptions());
                 Question question = new Question();
                 question.setExam(exam);
                 question.setContent(dto.getContent());
+                question.setQuestionType(questionType);
                 question.setExplanation(dto.getExplanation());
-                question.setScoreWeight(dto.getScoreWeight() != null ? dto.getScoreWeight() : 1.0);
+                question.setScoreWeight(resolveQuestionScore(dto.getScore(), dto.getScoreWeight()));
+                question.setSampleAnswer(dto.getSampleAnswer());
+                question.setGradingGuide(dto.getGradingGuide());
                 question.setDifficulty(parseAiDifficulty(dto.getDifficulty()));
                 question.setIsHidden(false);
                 questionsToSave.add(question);
 
-                if (dto.getOptions() != null) {
+                if (questionType == QuestionType.MULTIPLE_CHOICE && dto.getOptions() != null) {
                     for (AiOptionDto optDto : dto.getOptions()) {
                         QuestionOption option = new QuestionOption();
                         option.setQuestion(question); // Nối khóa ngoại question_id
@@ -563,7 +740,7 @@ public class ExamManagementService {
             log.info("Đã lưu thành công {} câu hỏi vào DB cho Đề thi ID: {}", questionsToSave.size(), examId);
 
         } catch (Exception e) {
-            log.error("Lỗi khi parse và lưu JSON từ AI cho Exam ID {}: {}", examId, e.getMessage());
+            log.error("Lỗi khi parse và lưu JSON từ AI cho Exam ID {}: {}", examId, e.getMessage(), e);
             throw new RuntimeException("Không thể lưu dữ liệu AI vào Database", e);
         }
     }

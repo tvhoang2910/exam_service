@@ -77,10 +77,10 @@ public class ExamUploadController {
     }
 
     // =========================================================================
-    // API DANH CHO CONTRIBUTOR VA ADMIN (NGHIEP VU DUYET DE)
+    // API DANH CHO CONTRIBUTOR (NGHIEP VU DUYET DE)
     // =========================================================================
 
-    @PreAuthorize("hasAnyRole('CONTRIBUTOR', 'ADMIN')")
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @GetMapping("/pending")
     public ResponseEntity<ExamUploadPageResponse> getPendingUploads(
             @RequestParam(defaultValue = "0") int page,
@@ -90,7 +90,7 @@ public class ExamUploadController {
         return ResponseEntity.ok(uploadService.listPendingQueue(page, size));
     }
 
-    @PreAuthorize("hasAnyRole('CONTRIBUTOR', 'ADMIN')")
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @PostMapping("/{id}/approve")
     public ResponseEntity<ExamUploadResponse> approveUpload(@PathVariable Long id) {
 
@@ -100,7 +100,7 @@ public class ExamUploadController {
         return ResponseEntity.ok(response);
     }
 
-    @PreAuthorize("hasAnyRole('CONTRIBUTOR', 'ADMIN')")
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @PostMapping("/{id}/reject")
     public ResponseEntity<ExamUploadResponse> rejectUpload(
             @PathVariable Long id,

@@ -142,10 +142,10 @@ class ExamManagementControllerIntegrationTest {
         return headers;
     }
 
-    private ExamResponse createExamViaApi(String adminToken) {
+    private ExamResponse createExamViaApi(String contributorToken) {
         CreateExamRequest request = buildCreateExamRequest(
                 "Integration Test Exam " + UUID.randomUUID().toString().substring(0, 8));
-        HttpHeaders headers = bearerJsonHeaders(adminToken);
+        HttpHeaders headers = bearerJsonHeaders(contributorToken);
         ResponseEntity<ExamResponse> response = restTemplate.exchange(
                 BASE + "/exams", HttpMethod.POST,
                 new HttpEntity<>(request, headers), ExamResponse.class);
@@ -179,13 +179,13 @@ class ExamManagementControllerIntegrationTest {
     // ─── CREATE EXAM Tests ────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("createExam_asAdmin_shouldReturn200WithExamResponse")
-    void createExam_asAdmin_shouldReturn200WithExamResponse() {
-        String adminToken = generateToken(1L, "ADMIN");
+    @DisplayName("createExam_asContributor_shouldReturn200WithExamResponse")
+    void createExam_asContributor_shouldReturn200WithExamResponse() {
+        String contributorToken = generateToken(1L, "CONTRIBUTOR");
         CreateExamRequest request = buildCreateExamRequest(
                 "IT Create Test " + UUID.randomUUID().toString().substring(0, 8));
 
-        HttpHeaders headers = bearerJsonHeaders(adminToken);
+        HttpHeaders headers = bearerJsonHeaders(contributorToken);
         ResponseEntity<ExamResponse> response = restTemplate.exchange(
                 BASE + "/exams", HttpMethod.POST,
                 new HttpEntity<>(request, headers), ExamResponse.class);
@@ -226,8 +226,9 @@ class ExamManagementControllerIntegrationTest {
     @DisplayName("getPublicExam_byId_whenPublished_shouldReturn200")
     void getPublicExam_byId_whenPublished_shouldReturn200() {
         // Create exam and publish it
-        String adminToken = generateToken(1L, "ADMIN");
-        ExamResponse created = createExamViaApi(adminToken);
+        String contributorToken = generateToken(1L, "CONTRIBUTOR");
+        String adminToken = generateToken(2L, "ADMIN");
+        ExamResponse created = createExamViaApi(contributorToken);
 
         // Publish the exam
         restTemplate.exchange(
@@ -256,8 +257,8 @@ class ExamManagementControllerIntegrationTest {
     @Test
     @DisplayName("getPublicExam_draftExam_shouldReturn404")
     void getPublicExam_draftExam_shouldReturn404() {
-        String adminToken = generateToken(1L, "ADMIN");
-        ExamResponse created = createExamViaApi(adminToken);
+        String contributorToken = generateToken(1L, "CONTRIBUTOR");
+        ExamResponse created = createExamViaApi(contributorToken);
 
         // DRAFT exams should not be accessible from public endpoint
         ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
@@ -269,12 +270,12 @@ class ExamManagementControllerIntegrationTest {
     // ─── MANAGED EXAM Tests ───────────────────────────────────────────────────
 
     @Test
-    @DisplayName("getManagedExams_asAdmin_shouldReturn200WithList")
-    void getManagedExams_asAdmin_shouldReturn200WithList() {
-        String adminToken = generateToken(1L, "ADMIN");
-        createExamViaApi(adminToken);
+    @DisplayName("getManagedExams_asContributor_shouldReturn200WithList")
+    void getManagedExams_asContributor_shouldReturn200WithList() {
+        String contributorToken = generateToken(1L, "CONTRIBUTOR");
+        createExamViaApi(contributorToken);
 
-        HttpHeaders headers = bearerHeaders(adminToken);
+        HttpHeaders headers = bearerHeaders(contributorToken);
         ResponseEntity<List<Map<String, Object>>> response = restTemplate.exchange(
                 BASE + "/exams/manage", HttpMethod.GET,
                 new HttpEntity<>(headers), LIST_MAP_OBJECT_TYPE);
@@ -299,15 +300,15 @@ class ExamManagementControllerIntegrationTest {
     // ─── UPDATE EXAM Tests ────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("updateExam_asAdmin_shouldReturn200WithUpdatedExam")
-    void updateExam_asAdmin_shouldReturn200WithUpdatedExam() {
-        String adminToken = generateToken(1L, "ADMIN");
-        ExamResponse created = createExamViaApi(adminToken);
+    @DisplayName("updateExam_asContributor_shouldReturn200WithUpdatedExam")
+    void updateExam_asContributor_shouldReturn200WithUpdatedExam() {
+        String contributorToken = generateToken(1L, "CONTRIBUTOR");
+        ExamResponse created = createExamViaApi(contributorToken);
 
         CreateExamRequest updateRequest = buildCreateExamRequest(
                 "Updated Title " + UUID.randomUUID().toString().substring(0, 8));
 
-        HttpHeaders headers = bearerJsonHeaders(adminToken);
+        HttpHeaders headers = bearerJsonHeaders(contributorToken);
         ResponseEntity<ExamResponse> response = restTemplate.exchange(
                 BASE + "/exams/" + created.getId(), HttpMethod.PUT,
                 new HttpEntity<>(updateRequest, headers), ExamResponse.class);
@@ -320,14 +321,14 @@ class ExamManagementControllerIntegrationTest {
     // ─── DELETE EXAM Tests ────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("deleteExam_asAdmin_shouldReturn204")
-    void deleteExam_asAdmin_shouldReturn204() {
-        String adminToken = generateToken(1L, "ADMIN");
-        ExamResponse created = createExamViaApi(adminToken);
+    @DisplayName("deleteExam_asContributor_shouldReturn204")
+    void deleteExam_asContributor_shouldReturn204() {
+        String contributorToken = generateToken(1L, "CONTRIBUTOR");
+        ExamResponse created = createExamViaApi(contributorToken);
         // Remove from cleanup list since we're deleting manually
         createdExamIds.remove(created.getId());
 
-        HttpHeaders headers = bearerHeaders(adminToken);
+        HttpHeaders headers = bearerHeaders(contributorToken);
         ResponseEntity<Void> response = restTemplate.exchange(
                 BASE + "/exams/" + created.getId(), HttpMethod.DELETE,
                 new HttpEntity<>(headers), Void.class);
@@ -340,8 +341,9 @@ class ExamManagementControllerIntegrationTest {
     @Test
     @DisplayName("updateExamStatus_toPublished_shouldReturn200WithPublishedStatus")
     void updateExamStatus_toPublished_shouldReturn200WithPublishedStatus() {
-        String adminToken = generateToken(1L, "ADMIN");
-        ExamResponse created = createExamViaApi(adminToken);
+        String contributorToken = generateToken(1L, "CONTRIBUTOR");
+        String adminToken = generateToken(2L, "ADMIN");
+        ExamResponse created = createExamViaApi(contributorToken);
 
         HttpHeaders headers = bearerHeaders(adminToken);
         ResponseEntity<ExamResponse> response = restTemplate.exchange(

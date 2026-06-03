@@ -8,8 +8,12 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AiQuestionDto {
     private String content;
+    private String questionType;
     private String explanation;
+    private String sampleAnswer;
+    private String gradingGuide;
     private String difficulty;
+    private Double score;
     private Double scoreWeight;
     private List<AiOptionDto> options;
 }

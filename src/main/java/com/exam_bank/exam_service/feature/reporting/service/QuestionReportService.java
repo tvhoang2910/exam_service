@@ -68,7 +68,9 @@ public class QuestionReportService {
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Không tìm thấy lần làm bài"));
 
         if (attempt.getStatus() != ExamAttemptStatus.SUBMITTED
-                && attempt.getStatus() != ExamAttemptStatus.AUTO_SUBMITTED) {
+                && attempt.getStatus() != ExamAttemptStatus.AUTO_SUBMITTED
+                && attempt.getStatus() != ExamAttemptStatus.PARTIALLY_GRADED
+                && attempt.getStatus() != ExamAttemptStatus.GRADED) {
             throw new ResponseStatusException(BAD_REQUEST, "Chỉ có thể báo lỗi sau khi nộp bài");
         }
 
@@ -102,10 +104,10 @@ public class QuestionReportService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ReportQueueItem> getReportQueue(Pageable pageable, Long ownerUserId) {
-        Page<Long> queuedQuestionIds = reportRepository.findQueuedQuestionIdsByExamCreator(
-                String.valueOf(ownerUserId),
-                pageable);
+    public Page<ReportQueueItem> getReportQueue(Pageable pageable, Long ownerUserId, boolean isAdmin) {
+        Page<Long> queuedQuestionIds = isAdmin
+                ? reportRepository.findQueuedQuestionIds(pageable)
+                : reportRepository.findQueuedQuestionIdsByExamCreator(String.valueOf(ownerUserId), pageable);
         if (queuedQuestionIds.isEmpty()) {
             return Page.empty(pageable);
         }
@@ -118,10 +120,10 @@ public class QuestionReportService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ReportQueueItem> getProcessedReportQueue(Pageable pageable, Long ownerUserId) {
-        Page<Long> processedQuestionIds = reportRepository.findProcessedQuestionIdsByExamCreator(
-                String.valueOf(ownerUserId),
-                pageable);
+    public Page<ReportQueueItem> getProcessedReportQueue(Pageable pageable, Long ownerUserId, boolean isAdmin) {
+        Page<Long> processedQuestionIds = isAdmin
+                ? reportRepository.findProcessedQuestionIds(pageable)
+                : reportRepository.findProcessedQuestionIdsByExamCreator(String.valueOf(ownerUserId), pageable);
         if (processedQuestionIds.isEmpty()) {
             return Page.empty(pageable);
         }
@@ -134,8 +136,8 @@ public class QuestionReportService {
     }
 
     @Transactional(readOnly = true)
-    public List<QuestionReportResponse> getReportsForQuestion(Long questionId, Long ownerUserId) {
-        assertQuestionOwnedByUser(questionId, ownerUserId);
+    public List<QuestionReportResponse> getReportsForQuestion(Long questionId, Long ownerUserId, boolean isAdmin) {
+        assertQuestionAccessible(questionId, ownerUserId, isAdmin);
         return reportRepository.findDetailedByQuestionIdOrderByCreatedAtDesc(questionId)
                 .stream()
                 .map(QuestionReportResponse::from)
@@ -143,8 +145,9 @@ public class QuestionReportService {
     }
 
     @Transactional(readOnly = true)
-    public List<QuestionReportHistoryResponse> getReportHistoryForQuestion(Long questionId, Long ownerUserId) {
-        assertQuestionOwnedByUser(questionId, ownerUserId);
+    public List<QuestionReportHistoryResponse> getReportHistoryForQuestion(Long questionId, Long ownerUserId,
+            boolean isAdmin) {
+        assertQuestionAccessible(questionId, ownerUserId, isAdmin);
         return historyRepository.findByQuestionIdOrderByProcessedAtDesc(questionId)
                 .stream()
                 .map(QuestionReportHistoryResponse::from)
@@ -152,8 +155,9 @@ public class QuestionReportService {
     }
 
     @Transactional
-    public void resolveQuestionReports(Long questionId, Long resolvedBy, ResolveReportRequest request) {
-        assertQuestionOwnedByUser(questionId, resolvedBy);
+    public void resolveQuestionReports(Long questionId, Long resolvedBy, boolean isAdmin,
+            ResolveReportRequest request) {
+        assertQuestionAccessible(questionId, resolvedBy, isAdmin);
 
         if (request.getStatus() == ReportStatus.REPORTED) {
             throw new ResponseStatusException(BAD_REQUEST, "Trạng thái xử lý không hợp lệ");
@@ -316,9 +320,11 @@ public class QuestionReportService {
         }
     }
 
-    private void assertQuestionOwnedByUser(Long questionId, Long ownerUserId) {
-        boolean ownsQuestion = questionRepository.existsByIdAndExamCreatedBy(questionId, String.valueOf(ownerUserId));
-        if (!ownsQuestion) {
+    private void assertQuestionAccessible(Long questionId, Long ownerUserId, boolean isAdmin) {
+        boolean canAccess = isAdmin
+                ? questionRepository.existsById(questionId)
+                : questionRepository.existsByIdAndExamCreatedBy(questionId, String.valueOf(ownerUserId));
+        if (!canAccess) {
             throw new ResponseStatusException(NOT_FOUND, "Không tìm thấy câu hỏi cần xử lý");
         }
     }

@@ -8,6 +8,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.Set;
+
 public interface ExamUploadRequestRepository extends JpaRepository<ExamUploadRequest, Long> {
 
     Page<ExamUploadRequest> findByStatus(ExamUploadStatus status, Pageable pageable);
@@ -16,16 +19,24 @@ public interface ExamUploadRequestRepository extends JpaRepository<ExamUploadReq
             select request
             from ExamUploadRequest request
             where request.status = :status
-              and exists (
-                  select history.id
-                  from ExamUploadHistory history
-                  where history.uploadRequestId = request.id
-                    and history.action = 'SUBMITTED'
-              )
+              and request.uploaderId <> :reviewerId
             """)
-    Page<ExamUploadRequest> findSubmittedByStatus(@Param("status") ExamUploadStatus status, Pageable pageable);
+    Page<ExamUploadRequest> findPendingForReviewer(@Param("status") ExamUploadStatus status,
+            @Param("reviewerId") Long reviewerId,
+            Pageable pageable);
 
     Page<ExamUploadRequest> findByUploaderId(Long uploaderId, Pageable pageable);
 
     Page<ExamUploadRequest> findByUploaderIdAndStatus(Long uploaderId, ExamUploadStatus status, Pageable pageable);
+
+    java.util.Optional<ExamUploadRequest> findByExtractedExamId(Long extractedExamId);
+
+    @Query("""
+            select request.extractedExamId
+            from ExamUploadRequest request
+            where request.extractedExamId in :examIds
+              and request.status not in :visibleStatuses
+            """)
+    Set<Long> findHiddenManagedExamIds(@Param("examIds") Collection<Long> examIds,
+            @Param("visibleStatuses") Collection<ExamUploadStatus> visibleStatuses);
 }

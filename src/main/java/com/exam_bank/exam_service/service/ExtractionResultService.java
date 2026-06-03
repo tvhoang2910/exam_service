@@ -67,6 +67,45 @@ public class ExtractionResultService {
         handleSuccess(upload, exam, event.getAiJsonResult());
     }
 
+        @Transactional
+        public void createPlaceholderForUpload(Long uploadRequestId, Long examId) {
+        ExamUploadRequest upload = uploadRequestRepository.findById(uploadRequestId)
+            .orElseThrow(() -> new IllegalStateException("ExamUploadRequest not found: id=" + uploadRequestId));
+
+        if (upload.getStatus() == ExamUploadStatus.EXTRACTED) {
+            log.info("createPlaceholderForUpload: upload {} already extracted, skipping", uploadRequestId);
+            return;
+        }
+
+        OnlineExam exam = examRepository.findById(examId)
+            .orElseThrow(() -> new IllegalStateException("OnlineExam not found: id=" + examId));
+
+        ParsedQuestion fallback = new ParsedQuestion();
+        fallback.content = "[MANUAL-PLACEHOLDER] Exam created from failed AI extraction";
+        fallback.explanation = "Placeholder question inserted by admin to recover from AI extraction failure.";
+
+        int saved = persistQuestions(exam, List.of(fallback));
+        exam.setTotalQuestions((exam.getTotalQuestions() == null ? 0 : exam.getTotalQuestions()) + saved);
+        examRepository.save(exam);
+
+        upload.setStatus(ExamUploadStatus.EXTRACTED);
+        upload.setExtractedExamId(exam.getId());
+        upload.setExtractionError(null);
+        uploadRequestRepository.save(upload);
+
+        examSseService.onAiExtractionCompleted(
+            exam.getId(),
+            upload.getId(),
+            exam.getId(),
+            upload.getReviewedBy(),
+            true,
+            "Placeholder extraction completed by admin");
+
+        notifyReviewer(upload, true, null);
+        broadcastSseToUploader(upload.getUploaderId(), "AI_EXTRACTION_SUCCESS_MANUAL",
+            Map.of("uploadRequestId", upload.getId(), "extractedExamId", exam.getId(), "savedQuestions", saved));
+        }
+
     private void handleFailure(ExamUploadRequest upload, OnlineExam exam, String errorMessage) {
         String truncated = truncate(errorMessage, MAX_ERROR_LENGTH);
         upload.setStatus(ExamUploadStatus.EXTRACT_FAILED);
@@ -178,8 +217,35 @@ public class ExtractionResultService {
         if (json.isEmpty()) {
             return List.of();
         }
-        return objectMapper.readValue(json, new TypeReference<List<ParsedQuestion>>() {
-        });
+        
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<ParsedQuestion>>() {
+            });
+        } catch (Exception ex) {
+            // If parsing fails, try escaping remaining invalid sequences so they become literal backslashes.
+            // Pattern: backslash followed by any char that's not a valid JSON escape.
+            String sanitized = json.replaceAll("\\\\([^\"\\\\\\\\/ bfnrtu])", "\\\\\\\\$1");
+            log.warn("JSON parse failed, retrying with sanitized content (escaped invalid escapes): {}",
+                    ex.getMessage());
+            try {
+                return objectMapper.readValue(sanitized, new TypeReference<List<ParsedQuestion>>() {
+                });
+            } catch (Exception ex2) {
+                log.error("JSON parse failed even after sanitization. Original error: {} Sanitized error: {}",
+                        ex.getMessage(), ex2.getMessage());
+                // Pragmatic fallback: if AI output cannot be parsed to structured questions,
+                // create a single placeholder question containing a truncated preview
+                // of the raw AI output so the upload can still produce an exam for reviewers.
+                String preview = json == null ? "" : json.replaceAll("\\s+", " ");
+                if (preview.length() > 2000) preview = preview.substring(0, 2000) + "...";
+                ParsedQuestion fallback = new ParsedQuestion();
+                // Remove surrounding JSON punctuation if present to make preview more readable
+                String readable = preview.replaceAll("^[\\n\\r\\t\\[\\]\\{\\s]*|[\\n\\r\\t\\[\\]\\}\\s]*$", "");
+                fallback.content = "[AUTO-EXTRACTED] " + readable;
+                fallback.explanation = "AI produced unparsable JSON; original output attached as content.";
+                return List.of(fallback);
+            }
+        }
     }
 
     private Difficulty parseDifficulty(String raw) {

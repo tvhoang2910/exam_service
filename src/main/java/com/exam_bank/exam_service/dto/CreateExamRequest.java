@@ -2,6 +2,7 @@ package com.exam_bank.exam_service.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.exam_bank.exam_service.entity.QuestionType;
 import lombok.*;
 import java.util.List;
 
@@ -27,12 +28,43 @@ public class CreateExamRequest {
 
     private List<QuestionDto> questions;
 
-    @Getter @Setter @NoArgsConstructor @AllArgsConstructor @ToString
+    @Getter @Setter @NoArgsConstructor @ToString
     public static class QuestionDto {
         private String content;
+        private QuestionType questionType = QuestionType.MULTIPLE_CHOICE;
         private String explanation;
+        private Double score;
         private Double scoreWeight;
+        private String sampleAnswer;
+        private String gradingGuide;
         private List<OptionDto> options;
+
+        public QuestionDto(String content, String explanation, Double scoreWeight, List<OptionDto> options) {
+            this.content = content;
+            this.explanation = explanation;
+            this.scoreWeight = scoreWeight;
+            this.options = options;
+            this.questionType = QuestionType.MULTIPLE_CHOICE;
+        }
+
+        public QuestionDto(
+                String content,
+                QuestionType questionType,
+                String explanation,
+                Double score,
+                Double scoreWeight,
+                String sampleAnswer,
+                String gradingGuide,
+                List<OptionDto> options) {
+            this.content = content;
+            this.questionType = questionType == null ? QuestionType.MULTIPLE_CHOICE : questionType;
+            this.explanation = explanation;
+            this.score = score;
+            this.scoreWeight = scoreWeight;
+            this.sampleAnswer = sampleAnswer;
+            this.gradingGuide = gradingGuide;
+            this.options = options;
+        }
     }
 
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @ToString

@@ -2,12 +2,15 @@ package com.exam_bank.exam_service.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.ColumnDefault;
@@ -54,8 +57,32 @@ public class ExamAttemptAnswer extends BaseEntity {
     private Integer answerChangeCount = 0;
 
     @Column(name = "text_answer", columnDefinition = "TEXT")
-    private String textAnswer; // Câu trả lời tự luận của học sinh
+    private String essayAnswer; // Câu trả lời tự luận của học sinh
 
     @Column(name = "teacher_feedback", columnDefinition = "TEXT")
-    private String teacherFeedback; // Lời phê/nhận xét của Contributor
+    private String feedback; // Lời phê/nhận xét của Contributor
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 30)
+    private AnswerStatus status = AnswerStatus.AUTO_GRADED;
+
+    @Version
+    @Column(name = "version")
+    private Long version;
+
+    public String getTextAnswer() {
+        return essayAnswer;
+    }
+
+    public void setTextAnswer(String textAnswer) {
+        this.essayAnswer = textAnswer;
+    }
+
+    public String getTeacherFeedback() {
+        return feedback;
+    }
+
+    public void setTeacherFeedback(String teacherFeedback) {
+        this.feedback = teacherFeedback;
+    }
 }

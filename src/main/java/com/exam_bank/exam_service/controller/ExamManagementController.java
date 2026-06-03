@@ -17,6 +17,7 @@ import com.exam_bank.exam_service.dto.message.ExamSourceUploadedEvent;
 import com.exam_bank.exam_service.service.MinioService;
 import com.exam_bank.exam_service.service.RabbitMQEventPublisher;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -31,6 +32,7 @@ public class ExamManagementController {
     private final MinioService minioService;
     private final RabbitMQEventPublisher eventPublisher;
 
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @PostMapping
     public ResponseEntity<ExamResponse> createExam(@RequestBody CreateExamRequest request) {
         ExamResponse response = examService.createManualExam(request);
@@ -39,6 +41,7 @@ public class ExamManagementController {
         return ResponseEntity.ok(response);
     }
 
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @GetMapping("/manage")
     public ResponseEntity<List<ExamResponse>> getManagedExams() {
         List<ExamResponse> exams = examService.getManagedExams();
@@ -46,6 +49,7 @@ public class ExamManagementController {
         return ResponseEntity.ok(exams);
     }
 
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @GetMapping("/manage/{examId}")
     public ResponseEntity<ExamResponse> getManagedExam(@PathVariable Long examId) {
         ExamResponse exam = examService.getManagedExamById(examId);
@@ -53,6 +57,7 @@ public class ExamManagementController {
         return ResponseEntity.ok(exam);
     }
 
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @PutMapping("/{examId}")
     public ResponseEntity<ExamResponse> updateExam(@PathVariable Long examId, @RequestBody CreateExamRequest request) {
         ExamResponse response = examService.updateExam(examId, request);
@@ -61,6 +66,7 @@ public class ExamManagementController {
         return ResponseEntity.ok(response);
     }
 
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @DeleteMapping("/{examId}")
     public ResponseEntity<Void> deleteExam(@PathVariable Long examId) {
         examService.deleteExam(examId);
@@ -68,6 +74,7 @@ public class ExamManagementController {
         return ResponseEntity.noContent().build();
     }
 
+    @PreAuthorize("hasRole('CONTRIBUTOR') or hasRole('ADMIN')")
     @PatchMapping("/{examId}/status")
     public ResponseEntity<ExamResponse> updateExamStatus(
             @PathVariable Long examId,
@@ -91,6 +98,7 @@ public class ExamManagementController {
         return ResponseEntity.ok(exam);
     }
 
+    @PreAuthorize("hasRole('CONTRIBUTOR')")
     @PostMapping(value = "/upload-source", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ExamResponse> uploadExamSource(
             @RequestParam("title") String title,

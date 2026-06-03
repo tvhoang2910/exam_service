@@ -15,6 +15,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -55,7 +56,8 @@ public class QuestionReportController {
     @GetMapping("/admin/reports")
     public ResponseEntity<ReportQueuePageResponse> getReportQueue(@PageableDefault(size = 20) Pageable pageable) {
         Long userId = authenticatedUserService.getCurrentUserId();
-        Page<ReportQueueItem> page = questionReportService.getReportQueue(pageable, userId);
+        boolean isAdmin = authenticatedUserService.currentUserHasRole("ADMIN");
+        Page<ReportQueueItem> page = questionReportService.getReportQueue(pageable, userId, isAdmin);
         return ResponseEntity.ok(ReportQueuePageResponse.from(page));
     }
 
@@ -63,28 +65,33 @@ public class QuestionReportController {
     public ResponseEntity<ReportQueuePageResponse> getProcessedReportQueue(
             @PageableDefault(size = 20) Pageable pageable) {
         Long userId = authenticatedUserService.getCurrentUserId();
-        Page<ReportQueueItem> page = questionReportService.getProcessedReportQueue(pageable, userId);
+        boolean isAdmin = authenticatedUserService.currentUserHasRole("ADMIN");
+        Page<ReportQueueItem> page = questionReportService.getProcessedReportQueue(pageable, userId, isAdmin);
         return ResponseEntity.ok(ReportQueuePageResponse.from(page));
     }
 
     @GetMapping("/admin/reports/questions/{questionId}")
     public ResponseEntity<List<QuestionReportResponse>> getQuestionReports(@PathVariable Long questionId) {
         Long userId = authenticatedUserService.getCurrentUserId();
-        return ResponseEntity.ok(questionReportService.getReportsForQuestion(questionId, userId));
+        boolean isAdmin = authenticatedUserService.currentUserHasRole("ADMIN");
+        return ResponseEntity.ok(questionReportService.getReportsForQuestion(questionId, userId, isAdmin));
     }
 
     @GetMapping("/admin/reports/questions/{questionId}/history")
     public ResponseEntity<List<QuestionReportHistoryResponse>> getReportHistory(@PathVariable Long questionId) {
         Long userId = authenticatedUserService.getCurrentUserId();
-        return ResponseEntity.ok(questionReportService.getReportHistoryForQuestion(questionId, userId));
+        boolean isAdmin = authenticatedUserService.currentUserHasRole("ADMIN");
+        return ResponseEntity.ok(questionReportService.getReportHistoryForQuestion(questionId, userId, isAdmin));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/admin/reports/questions/{questionId}/resolve")
     public ResponseEntity<Void> resolveReports(
             @PathVariable Long questionId,
             @Valid @RequestBody ResolveReportRequest request) {
         Long userId = authenticatedUserService.getCurrentUserId();
-        questionReportService.resolveQuestionReports(questionId, userId, request);
+        boolean isAdmin = authenticatedUserService.currentUserHasRole("ADMIN");
+        questionReportService.resolveQuestionReports(questionId, userId, isAdmin, request);
         return ResponseEntity.noContent().build();
     }
 }

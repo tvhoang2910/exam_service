@@ -45,11 +45,21 @@ public class Question extends BaseEntity {
     @Column(name = "content", columnDefinition = "TEXT", nullable = false)
     private String content;
 
+    @Column(name = "question_type", nullable = false, length = 30)
+    @Enumerated(EnumType.STRING)
+    private QuestionType questionType = QuestionType.MULTIPLE_CHOICE;
+
     @Column(name = "explanation", columnDefinition = "TEXT")
     private String explanation;
 
     @Column(name = "score_weight")
     private Double scoreWeight = 1.0;
+
+    @Column(name = "sample_answer", columnDefinition = "TEXT")
+    private String sampleAnswer;
+
+    @Column(name = "grading_guide", columnDefinition = "TEXT")
+    private String gradingGuide;
 
     @Column(name = "difficulty", length = 20)
     @Enumerated(EnumType.STRING)
